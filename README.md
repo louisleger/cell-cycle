@@ -10,7 +10,7 @@ The main findings of this project are presented in the 3 main notebooks:
     - Regresses the FUCCI using deep learning models and explains their performance based on different subsets of data
 
 The rest of the repository contains the scripts used to visualize data, train and evaluate neural networks
-Repository tree: 
+```
 .
 ├── 0_data_overview.ipynb
 ├── 1_analysis_overview.ipynb
@@ -33,4 +33,5 @@ Repository tree:
 │   └── visualize.py
 ├── weights
 └── well_info.csv
+```
 
