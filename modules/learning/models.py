@@ -1,4 +1,4 @@
-from mamba import *
+from modules.learning.mamba import *
 import torch.nn as nn
 from einops import rearrange
 from torchvision import models
@@ -78,6 +78,17 @@ class EfficientNet(nn.Module):
         x = rearrange(x, "(b s) e -> b s e", b = B, s = S)
         return self.prediction_head(x)
     
+    # Function to freeze parameters
+    def freeze(self):
+        for param in self.parameters(): param.requires_grad = False
+    
+    # When Parameters are Frozen, Keep BatchNorm Layers in Inference Mode
+    def train(self, mode=True):
+        if list(self.parameters())[0].requires_grad == False:    
+            self.spatial_encoder.training = False
+            for module in self.spatial_encoder.children(): module.train(False)
+        else: super().train(mode)
+    
 # Dynamic Cellular Phase Model, proposal and proof of concept
 class DYCE(nn.Module):
     def __init__(self, spatial_encoder, z_dim=256, n_layers=6):
@@ -101,7 +112,7 @@ class DYCE(nn.Module):
     def forward(self, x):
         # z_1 shape = (B, S, Z_1)
         z_1 = self.spatial_encoder(x)
-
+        
         # z_2 shape = (B, S, Z_2)
         z_2 = self.temporal_encoder( self.fc(z_1) )
 

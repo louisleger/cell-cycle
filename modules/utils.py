@@ -10,7 +10,7 @@ def tensor_to_array(x): return x.squeeze().cpu().detach().numpy()
 
 # Function to save the running training configuration and model
 def save_config(config, model, config_dir): 
-    with open(f'{config_dir}configs/config-{config["number"]}.json', 'w') as file:
+    with open(f'{config_dir}weights/config-{config["number"]}.json', 'w') as file:
         json.dump(config, file, indent=4)
     torch.save(model.state_dict(), config['path'] + f'model-{config["number"]}.pt')
 
@@ -36,13 +36,30 @@ def nd_wasserstein(x, y):
     return result/x.shape[1]
 
 # Run a moving/rolling average on a time-series signal
-def moving_average(arr, window = 5): 
-    if (window==0): return arr
-    if arr.ndim > 1: 
+#def moving_average(arr, window = 5): 
+#    if (window==0): return arr
+#    if arr.ndim > 1: 
+#        result = np.zeros_like(arr)
+#        for i in range(arr.shape[1]):  result[:, i] = np.convolve(arr[:, i], np.ones(window), mode='valid')/window
+#        return result
+#    return np.convolve(arr, np.ones(window), mode='valid')/window
+
+def moving_average(arr, window=5):
+    if window == 0: 
+        return arr
+    pad_width = window // 2
+
+    if arr.ndim > 1:
         result = np.zeros_like(arr)
-        for i in range(arr.shape[1]):  result[:, i] = np.convolve(arr[:, i], np.ones(window)/window, mode='same')
+        for i in range(arr.shape[1]):
+            # Padding with the edge values to avoid zero-padding effects
+            padded_col = np.pad(arr[:, i], pad_width, mode='edge')
+            result[:, i] = np.convolve(padded_col, np.ones(window), mode='valid') / window
         return result
-    return np.convolve(arr, np.ones(window)/window, mode='same')
+
+    # Padding with the edge values to avoid zero-padding effects
+    padded_arr = np.pad(arr, pad_width, mode='edge')
+    return np.convolve(padded_arr, np.ones(window), mode='valid') / window
 
 # Run multiple moving averages with different window sizes
 def multi_layer_moving_average(x, layers = 3, windows = [5, 5, 5]):

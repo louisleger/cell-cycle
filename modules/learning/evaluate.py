@@ -14,7 +14,7 @@ import os
 import torch
 import numpy as np
 import pandas as pd
-from utils import *
+from modules.utils import *
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_absolute_error, mean_squared_error, ConfusionMatrixDisplay
@@ -39,7 +39,7 @@ class Evaluation():
         for idx, cell in enumerate(tqdm(self.cells)):
             # Get input with specific image channels and groundtruth FUCCI signal
             x = torch.tensor(np.load(img_directory + cell, allow_pickle=True), dtype=torch.float32)[:, img_channels, :, :].unsqueeze(0).to(DEVICE)
-            y = np.stack(np.load(label_directory + cell, allow_pickle=True)).T
+            y = np.load(label_directory + cell, allow_pickle=True).reshape(2, -1).T
             
             # Take a random slice of track
             if (slice_len > 0 and slice_len < y.shape[0]): x, y = self.random_slice(x, y, slice_len)
@@ -122,7 +122,7 @@ from einops.layers.torch import Reduce
 DATA_PATH = '/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/0-RPE-cell-timelapse/'
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-def plot_umap(u, data=None):
+def plot_umap(u, data=None,):
     if data is None: data = np.zeros(len(u))
     fig, ax = plt.subplots(figsize = (10, 8))
     ax.scatter(u[:, 0], u[:, 1], s = 0.5, c = data); plt.show()
@@ -133,11 +133,11 @@ def get_latent_space(directory, model, img_channels, n_pca_components = 1, seed 
     if track_mean: model.prediction_head = Reduce('b t e -> b 1 e', 'mean')
     model.eval(); model.to(DEVICE)
     # Go through dataset and save internal representations in representations df
-    representations_df = pd.DataFrame(); representations_df['z'] = [None]* len(dataset); representations_df['tau'] = [None]* len(dataset); start_time = time.time(); representations_df['fg'] = [None]* len(dataset)
+    representations_df = pd.DataFrame(); representations_df['z'] = [None]* len(dataset); representations_df['tau'] = [None]* len(dataset); start_time = time.time()
     with torch.no_grad():
         for idx, (name, imgs, la) in enumerate(tqdm(loader)):
             z = model(imgs.to(DEVICE))
-            representations_df.at[idx, 'z'] = z.cpu().numpy()[0]; representations_df.at[idx, 'tau'] = np.linspace(0, 1, imgs.shape[1]); representations_df.at[idx, 'name'] = name[0]; representations_df.at[idx, 'fg'] = la[0][:, 0]
+            representations_df.at[idx, 'z'] = z.cpu().numpy()[0]; representations_df.at[idx, 'tau'] = np.linspace(0, 1, imgs.shape[1]); representations_df.at[idx, 'name'] = name[0]
     print("Got internal representations in ", round(time.time() - start_time, 2), 's'); start_time=time.time()
 
     # Run umap and plot it

@@ -28,11 +28,11 @@ PATH = {
     1:"/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/260124-RPE-timelapse/Stitched/",
     2:"/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/21062024_RPE_before_after_inhibitors/Aligned/"
 }
-SAVE_PATH = f"/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/0-RPE-cell-timelapse/extraction/"
+SAVE_PATH = f"/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/0-RPE-cell-timelapse/extraction_z_score/"
 CELL_SIZE = 64
 MIN_TRACK_LENGTH = 72 # cell tracked for atleast 6h 
 IMG_CHANNELS = [0, 3, 4]   #0: PC, 1: FG, 2: FR, 3: BF, 4: H2B
-N_CPU = 24
+N_CPU = 16
 
 """
 start of script; nothing left to modify
@@ -59,13 +59,12 @@ def get_cells_collection(mask_filenames, well_id, cells_of_interest):
                 # Consider only filtered cells and cells in the mask
                 unique_cell_ids = np.unique(mask_img)
                 frame_cells = set(cells_of_interest) & set(unique_cell_ids)
+                background = np.mean(I[frame_idx], axis=(1, 2)); background_noise = np.std(I[frame_idx], axis=(1, 2))
                 for cell_id in frame_cells:
-
                     if (cell_id not in cell_stats_collection.keys()):
-                        cell_stats_collection[cell_id] =  {'AREA': [], 'POSITION': [], 'RADIUS': [], 'CHANNEL_SUM': [],
-                                                           'CHANNEL_MEAN': [], 'CHANNEL_MEDIAN': [], 'CHANNEL_STD': [], 'CELL_IMG': [], 'FRAME': []}
+                        cell_stats_collection[cell_id] =  {'AREA': [], 'POSITION': [], 'RADIUS': [], 'CHANNEL_SUM': [], 'CHANNEL_MEAN': [], 'CELL_IMG': [], 'FRAME': []}
                     
-                    rows, cols = np.where(mask_img == cell_id) 
+                    rows, cols = np.where(mask_img == cell_id)
                     area = len(rows)
                     position = np.around((np.mean(rows), np.mean(cols)), decimals=1)
                     distances = np.sqrt((rows - position[0])**2 + (cols - position[1])**2)
@@ -77,16 +76,14 @@ def get_cells_collection(mask_filenames, well_id, cells_of_interest):
                     cell_stats_collection[cell_id]['RADIUS'].append(radius)
                     cell_stats_collection[cell_id]['FRAME'].append(frame_idx)
                     
-                    #Add integrated channel values
-                    nucleus_values = I[frame_idx,:,rows,cols]
+                    #Add integrated channel values(raw_frame - background)[:, np.newaxis, np.newaxis]/background_noise[:, np.newaxis, np.newaxis]
+
+                    nucleus_values = np.round((I[frame_idx, :, rows, cols] - background[np.newaxis, :])/background_noise[np.newaxis, :], 2).astype(np.float16)
                     cell_stats_collection[cell_id]['CHANNEL_SUM'].append(nucleus_values.sum(axis = 0))
-                    cell_stats_collection[cell_id]['CHANNEL_MEDIAN'].append(np.around(np.median(nucleus_values, axis=0), 1))
-                    cell_stats_collection[cell_id]['CHANNEL_STD'].append(np.around(nucleus_values.std(axis = 0), 1))
-                    cell_stats_collection[cell_id]['CHANNEL_MEAN'].append(np.around(nucleus_values.mean(axis = 0), 1))
+                    cell_stats_collection[cell_id]['CHANNEL_MEAN'].append(np.around(nucleus_values.mean(axis = 0), 2))
                     
                     #Add raw cutout of cell image
-                    raw_img = I[frame_idx, IMG_CHANNELS, int(position[0]-CELL_SIZE/2):int(position[0]+CELL_SIZE/2),
-                                        int(position[1]-CELL_SIZE/2):int(position[1]+CELL_SIZE/2)]
+                    raw_img = I[frame_idx, IMG_CHANNELS, int(position[0]-CELL_SIZE/2):int(position[0]+CELL_SIZE/2), int(position[1]-CELL_SIZE/2):int(position[1]+CELL_SIZE/2)]
                     cell_stats_collection[cell_id]['CELL_IMG'].append(raw_img)
 
         print("Done Calculating Collection")
@@ -175,13 +172,13 @@ def optimized_expand_ctc_results(well_id, save_path):
     cells = filtered_tracks['CELL_ID'].values.tolist()
     for c in cells:
         exploded_df = filtered_tracks[filtered_tracks['CELL_ID'] == c].explode(column = ['FRAME','AREA','POSITION',
-                        'RADIUS','CHANNEL_SUM','CHANNEL_MEAN','CHANNEL_MEDIAN','CHANNEL_STD','CELL_IMG']
+                        'RADIUS','CHANNEL_SUM', 'CHANNEL_MEAN', 'CELL_IMG']
                         ).reset_index(drop=True)
         result_df = pd.concat([result_df, exploded_df], axis=0).reset_index(drop=True)
     
     # Separate extracted data into 2 output dataframes and save/pickle them
     column_types = {"information": ["T_START", "T_END", "DELTA_T", "AREA", "POSITION", "RADIUS", "PARENT"],
-                    "channel": ['CHANNEL_SUM', 'CHANNEL_MEAN', 'CHANNEL_MEDIAN', 'CHANNEL_STD'],
+                    "channel": ['CHANNEL_SUM', 'CHANNEL_MEAN'],
                     "images": ['CELL_IMG'],}
     
     channel_df = result_df[['CELL_ID', 'FRAME'] + column_types["channel"] + column_types['information']]
