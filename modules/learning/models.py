@@ -78,7 +78,7 @@ class CNN(nn.Module):
         )
 
         self.pool = nn.AdaptiveAvgPool2d(output_size=1)
-
+        
         self.prediction_head = nn.Sequential(
             nn.Linear(out_channels * 16, out_channels * 4),
             nn.GELU(),
