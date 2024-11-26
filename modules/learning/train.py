@@ -45,11 +45,12 @@ class track_dataset(Dataset):
         )  # minimum 2h of images
 
     def __getitem__(self, idx):
-        # Load images and labels
+        # Load images and labels, T (time) x C x H x W
         imgs = torch.tensor(
             np.load(self.img_directory + self.cells[idx], allow_pickle=True),
             dtype=torch.float32,
         )[:, self.img_channels, :, :]
+        # Load labels, T x F (fucci = 2)
         labels = torch.tensor(
             np.load(self.label_directory + self.cells[idx]).reshape(2, -1).T,
             dtype=torch.float32,
@@ -94,12 +95,38 @@ def train_model(
         "test_R2": [],
     }
     # Setting up data loaders
-    train, test = track_dataset(
-        directory + "train/", img_channels, slice_p, slice_len, random_len
-    ), track_dataset(directory + "test/", img_channels, slice_p, slice_len, random_len)
-    train_loader, test_loader = DataLoader(
-        train, batch_size, True, num_workers=4, pin_memory=True
-    ), DataLoader(test, batch_size, True, num_workers=4, pin_memory=True)
+    train_Dataset = track_dataset(
+        directory + "train/",
+        img_channels=img_channels,
+        slice_p=slice_p,
+        slice_len=slice_len,
+        random_len=random_len,
+    )
+
+    test_Dataset = track_dataset(
+        directory + "test/",
+        img_channels=img_channels,
+        slice_p=slice_p,
+        slice_len=slice_len,
+        random_len=random_len,
+    )
+
+    # Create DataLoaders for train and test datasets
+    train_loader = DataLoader(
+        train_Dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+    )
+
+    test_loader = DataLoader(
+        test_Dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+    )
 
     # Setting up objective function and optimizer
     loss_function = nn.MSELoss()  # We could try different things for this
