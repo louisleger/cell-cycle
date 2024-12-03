@@ -39,15 +39,16 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 class DYCEP(nn.Module):
     def __init__(
         self,
+        cnn_in_channels=1,
         mamba_z_dim=256,
-        mamba_n_layers=3,
+        mamba_n_layers=6,
         freeze=False,
         vanilla_weights_dir="vanilla/coef_fourier.npy",
     ):
         super(DYCEP, self).__init__()
 
         # Initialize spatial encoder and freeze weights
-        self.spatial_encoder = CNN(in_channels=1, out_channels=32)
+        self.spatial_encoder = CNN(in_channels=cnn_in_channels, out_channels=32)
         # turns off the prediction head
         self.spatial_encoder.prediction_head = nn.Identity()
         if freeze:
@@ -62,12 +63,21 @@ class DYCEP(nn.Module):
         )
 
         # MLP Prediction head to regress un-normlaized phase jumps
-        self.prediction_head = nn.Sequential(
+        self.delta_predictor = nn.Sequential(
             nn.Linear(mamba_z_dim, mamba_z_dim),
             nn.GELU(),
             nn.Linear(mamba_z_dim, mamba_z_dim // 4),
             nn.GELU(),
             nn.Linear(mamba_z_dim // 4, 1),
+        )
+
+        self.start_end_predictor = nn.Sequential(
+            nn.Linear(mamba_z_dim, mamba_z_dim),
+            nn.GELU(),
+            nn.Linear(mamba_z_dim, mamba_z_dim // 4),
+            nn.GELU(),
+            nn.Linear(mamba_z_dim // 4, 1),
+            nn.Sigmoid(),
         )
 
         self.vanilla_weights = (
@@ -76,13 +86,29 @@ class DYCEP(nn.Module):
             .to(DEVICE)
         )
 
+    # # function that tranforms the output of mammba to phi
+    # def get_phi(self, x):
+    #     # from B x S X Z to B x S
+    #     w = self.prediction_head(x).squeeze(-1)
+    #     w[:, 0] = -float("inf")
+    #     phi = nn.functional.softmax(w, dim=-1)
+    #     phi = torch.cumsum(phi, dim=-1)
+    #     return phi
+
     # function that tranforms the output of mammba to phi
     def get_phi(self, x):
         # from B x S X Z to B x S
-        w = self.prediction_head(x).squeeze(-1)
+        w = self.delta_predictor(x).squeeze(-1)
         w[:, 0] = -float("inf")
-        phi = nn.functional.softmax(w, dim=-1)
-        phi = torch.cumsum(phi, dim=-1)
+
+        # get start and end predictions
+        start_end = self.start_end_predictor(x[:, [0, -1], :]).squeeze(-1)
+        span = start_end[:, -1] - start_end[:, 0]
+        
+        # rescaling the 
+        delta_phi = nn.functional.softmax(w, dim=-1) * span[:, None]
+        delta_phi[:, 0] = start_end[:, 0]
+        phi = torch.cumsum(delta_phi, dim=-1)
         return phi
 
     def vanilla_fn(self, tau):
