@@ -39,31 +39,45 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 class DYCEP(nn.Module):
     def __init__(
         self,
-        z_dim=256,
-        n_layers=6,
+        cnn_in_channels=1,
+        mamba_z_dim=256,
+        mamba_n_layers=6,
         freeze=False,
-        vanilla_weights_dir="vanilla_weights_control.npy",
+        vanilla_weights_dir="vanilla/coef_fourier.npy",
     ):
         super(DYCEP, self).__init__()
 
         # Initialize spatial encoder and freeze weights
-        self.spatial_encoder = CNN(in_channels=1, out_channels=32)
+        self.spatial_encoder = CNN(in_channels=cnn_in_channels, out_channels=32)
         # turns off the prediction head
         self.spatial_encoder.prediction_head = nn.Identity()
         if freeze:
             self.spatial_encoder.freeze()
 
         # Linear layer to match the dimensionality of Z_1 to Z_2, from Space to Time
-        self.fc_s2t = nn.Linear(self.spatial_encoder.z_dim, z_dim)
+        self.fc_s2t = nn.Linear(self.spatial_encoder.z_dim, mamba_z_dim)
 
         # Initialize Temporal Encoder with a Mamba Model
-        self.temporal_encoder = Mamba(MambaConfig(z_dim, n_layers, d_state=16))
+        self.temporal_encoder = Mamba(
+            MambaConfig(mamba_z_dim, mamba_n_layers, d_state=16)
+        )
 
         # MLP Prediction head to regress un-normlaized phase jumps
-        self.prediction_head = nn.Sequential(
-            nn.Linear(z_dim, z_dim // 4),
+        self.delta_predictor = nn.Sequential(
+            nn.Linear(mamba_z_dim, mamba_z_dim),
             nn.GELU(),
-            nn.Linear(z_dim // 4, 1),
+            nn.Linear(mamba_z_dim, mamba_z_dim // 4),
+            nn.GELU(),
+            nn.Linear(mamba_z_dim // 4, 1),
+        )
+
+        self.start_end_predictor = nn.Sequential(
+            nn.Linear(mamba_z_dim, mamba_z_dim),
+            nn.GELU(),
+            nn.Linear(mamba_z_dim, mamba_z_dim // 4),
+            nn.GELU(),
+            nn.Linear(mamba_z_dim // 4, 1),
+            nn.Sigmoid(),
         )
 
         self.vanilla_weights = (
@@ -72,30 +86,51 @@ class DYCEP(nn.Module):
             .to(DEVICE)
         )
 
+    # # function that tranforms the output of mammba to phi
+    # def get_phi(self, x):
+    #     # from B x S X Z to B x S
+    #     w = self.prediction_head(x).squeeze(-1)
+    #     w[:, 0] = -float("inf")
+    #     phi = nn.functional.softmax(w, dim=-1)
+    #     phi = torch.cumsum(phi, dim=-1)
+    #     return phi
+
     # function that tranforms the output of mammba to phi
     def get_phi(self, x):
         # from B x S X Z to B x S
-        w = self.prediction_head(x).squeeze(-1)
+        w = self.delta_predictor(x).squeeze(-1)
         w[:, 0] = -float("inf")
-        phi = nn.functional.softmax(w, dim=-1)
-        phi = torch.cumsum(phi, dim=-1)
+
+        # get start and end predictions
+        start_end = self.start_end_predictor(x[:, [0, -1], :]).squeeze(-1)
+        span = start_end[:, -1] - start_end[:, 0]
+        
+        # rescaling the 
+        delta_phi = nn.functional.softmax(w, dim=-1) * span[:, None]
+        delta_phi[:, 0] = start_end[:, 0]
+        phi = torch.cumsum(delta_phi, dim=-1)
         return phi
 
     def vanilla_fn(self, tau):
-        weights = self.vanilla_weights  # .to(tau.device)
 
-        n_harmonics = (weights.shape[1] - 1) // 2
+        n_harmonics = (self.vanilla_weights.shape[0] - 1) // 2
         k_values = torch.arange(1, n_harmonics + 1, device=tau.device).float()
 
         # Fourier Design Matrix
-        A = torch.ones((len(tau), 1 + 2 * n_harmonics), device=tau.device)
-        cosine_terms = torch.cos(2 * torch.pi * k_values[None, :] * tau[:, None])
-        sine_terms = torch.sin(2 * torch.pi * k_values[None, :] * tau[:, None])
-        A[:, 1::2] = cosine_terms
-        A[:, 2::2] = sine_terms
+        A = torch.ones(
+            (tau.shape[0], tau.shape[1], 1 + 2 * n_harmonics), device=tau.device
+        )
+        # B x S x (P-1)/2
+        cosine_terms = torch.cos(
+            2 * torch.pi * k_values[None, None, :] * tau[:, :, None]
+        )
+        sine_terms = torch.sin(2 * torch.pi * k_values[None, None, :] * tau[:, :, None])
+        A[:, :, 1::2] = cosine_terms
+        A[:, :, 2::2] = sine_terms
 
         # Get Vanilla Prediction
-        vanilla_prediction = torch.stack([A @ c for c in weights]).T
+        # vanilla_prediction = A @ self.vanilla_weights
+        vanilla_prediction = torch.einsum("bsp,pf->bsf", A, self.vanilla_weights)
 
         return vanilla_prediction
 
@@ -111,5 +146,25 @@ class DYCEP(nn.Module):
         phi = self.get_phi(z_2)
 
         # apply vanilla function to all elements of the batch
-        fucci = torch.stack([self.vanilla_fn(phi[i]) for i in range(phi.shape[0])])
+        # fucci = torch.stack([self.vanilla_fn(phi[i]) for i in range(phi.shape[0])])
+        fucci = self.vanilla_fn(phi)
+
         return fucci
+
+    # def no_batch_vanilla_fn(self, tau):
+    #     weights = self.vanilla_weights  # .to(tau.device)
+
+    #     n_harmonics = (weights.shape[1] - 1) // 2
+    #     k_values = torch.arange(1, n_harmonics + 1, device=tau.device).float()
+
+    #     # Fourier Design Matrix
+    #     A = torch.ones((len(tau), 1 + 2 * n_harmonics), device=tau.device)
+    #     cosine_terms = torch.cos(2 * torch.pi * k_values[None, :] * tau[:, None])
+    #     sine_terms = torch.sin(2 * torch.pi * k_values[None, :] * tau[:, None])
+    #     A[:, 1::2] = cosine_terms
+    #     A[:, 2::2] = sine_terms
+
+    #     # Get Vanilla Prediction
+    #     vanilla_prediction = torch.stack([A @ c for c in weights]).T
+
+    #     return vanilla_prediction
