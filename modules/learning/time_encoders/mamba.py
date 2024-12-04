@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from modules.learning.pscan import pscan
+from modules.learning.time_encoders.pscan import pscan
 
 """
 
