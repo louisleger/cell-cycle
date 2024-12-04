@@ -14,27 +14,6 @@ New model, better suited for phase inference
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-# VANILLA_WEIGHTS = torch.tensor(np.load("vanilla_weights_control.npy"))
-
-
-# def vanilla_fn(tau, weights=VANILLA_WEIGHTS):
-
-#     n_harmonics = (weights.shape[1] - 1) // 2
-
-#     k_values = np.arange(1, n_harmonics + 1)
-#     # Fourier Design Matrix for specific number of time points
-#     A = np.ones((len(tau), 1 + 2 * n_harmonics))
-#     cosine_terms = np.cos(2 * np.pi * k_values[:, None] * tau).T
-#     sine_terms = np.sin(2 * np.pi * k_values[:, None] * tau).T
-#     A[:, 1::2] = cosine_terms
-#     A[:, 2::2] = sine_terms
-
-#     # Get Vanilla Prediction
-#     vanilla_prediction = np.stack([A.dot(c) for c in weights]).T
-#     # Wrap output in tensor unsqueezed for a Batch Dimension
-#     return vanilla_prediction
-
-
 # Dynamic Cellular Phase Model, proposal and proof of concept
 class DYCEP(nn.Module):
     def __init__(
@@ -63,37 +42,15 @@ class DYCEP(nn.Module):
         )
 
         # MLP Prediction head to regress un-normlaized phase jumps
-        self.delta_predictor = nn.Sequential(
-            nn.Linear(mamba_z_dim, mamba_z_dim),
-            nn.GELU(),
-            nn.Linear(mamba_z_dim, mamba_z_dim // 4),
-            nn.GELU(),
-            nn.Linear(mamba_z_dim // 4, 1),
-        )
+        self.delta_predictor = DeltaPredictor(mamba_z_dim)
 
-        self.start_end_predictor = nn.Sequential(
-            nn.Linear(mamba_z_dim, mamba_z_dim),
-            nn.GELU(),
-            nn.Linear(mamba_z_dim, mamba_z_dim // 4),
-            nn.GELU(),
-            nn.Linear(mamba_z_dim // 4, 1),
-            nn.Sigmoid(),
-        )
+        self.start_end_predictor = StartEndPredictor(mamba_z_dim)
 
         self.vanilla_weights = (
             torch.tensor(np.load(vanilla_weights_dir), requires_grad=False)
             .float()
             .to(DEVICE)
         )
-
-    # # function that tranforms the output of mammba to phi
-    # def get_phi(self, x):
-    #     # from B x S X Z to B x S
-    #     w = self.prediction_head(x).squeeze(-1)
-    #     w[:, 0] = -float("inf")
-    #     phi = nn.functional.softmax(w, dim=-1)
-    #     phi = torch.cumsum(phi, dim=-1)
-    #     return phi
 
     # function that tranforms the output of mammba to phi
     def get_phi(self, x):
@@ -102,12 +59,19 @@ class DYCEP(nn.Module):
         w[:, 0] = -float("inf")
 
         # get start and end predictions
-        start_end = self.start_end_predictor(x[:, [0, -1], :]).squeeze(-1)
+        start_end = self.start_end_predictor(x).squeeze(-1)
         span = start_end[:, -1] - start_end[:, 0]
-        
-        # rescaling the 
+
+        if span.min() < 0 or span.max() > 1:
+            print("anormal span detected")
+            print(span)
+            print(start_end)
+
+        # rescaling the weights to span from start to start + span
         delta_phi = nn.functional.softmax(w, dim=-1) * span[:, None]
         delta_phi[:, 0] = start_end[:, 0]
+
+        # integrate to get phi
         phi = torch.cumsum(delta_phi, dim=-1)
         return phi
 
@@ -151,20 +115,35 @@ class DYCEP(nn.Module):
 
         return fucci
 
-    # def no_batch_vanilla_fn(self, tau):
-    #     weights = self.vanilla_weights  # .to(tau.device)
 
-    #     n_harmonics = (weights.shape[1] - 1) // 2
-    #     k_values = torch.arange(1, n_harmonics + 1, device=tau.device).float()
+class StartEndPredictor(nn.Module):
+    def __init__(self, mamba_z_dim):
+        super(StartEndPredictor, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(mamba_z_dim, mamba_z_dim),
+            nn.GELU(),
+            nn.Linear(mamba_z_dim, mamba_z_dim // 4),
+            nn.GELU(),
+            nn.Linear(mamba_z_dim // 4, 2),
+            nn.Sigmoid(),
+        )
 
-    #     # Fourier Design Matrix
-    #     A = torch.ones((len(tau), 1 + 2 * n_harmonics), device=tau.device)
-    #     cosine_terms = torch.cos(2 * torch.pi * k_values[None, :] * tau[:, None])
-    #     sine_terms = torch.sin(2 * torch.pi * k_values[None, :] * tau[:, None])
-    #     A[:, 1::2] = cosine_terms
-    #     A[:, 2::2] = sine_terms
+    def forward(self, x):
+        # x is of shape (B, S, Z), pooling over S
+        x = x.mean(dim=1)
+        return self.model(x)
 
-    #     # Get Vanilla Prediction
-    #     vanilla_prediction = torch.stack([A @ c for c in weights]).T
 
-    #     return vanilla_prediction
+class DeltaPredictor(nn.Module):
+    def __init__(self, mamba_z_dim):
+        super(DeltaPredictor, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(mamba_z_dim, mamba_z_dim),
+            nn.GELU(),
+            nn.Linear(mamba_z_dim, mamba_z_dim // 4),
+            nn.GELU(),
+            nn.Linear(mamba_z_dim // 4, 1),
+        )
+
+    def forward(self, x):
+        return self.model(x)
