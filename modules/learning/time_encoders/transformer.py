@@ -7,7 +7,9 @@ import copy
 
 
 class TransformerEncoder(nn.Module):
-    def __init__(self, d_model, num_heads, num_layers, max_seq_length=500, dropout=0.0):
+    def __init__(
+        self, d_model, num_heads=4, num_layers=6, max_seq_length=500, dropout=0.0
+    ):
         super(TransformerEncoder, self).__init__()
         self.d_ff = d_model * 4
         self.positional_encoding = PositionalEncoding(d_model, max_seq_length)
