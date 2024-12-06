@@ -170,6 +170,7 @@ def train_model(
             config["test_loss"].append(np.mean(running_loss["test"]))
             config["train_R2"].append(np.mean(running_loss["train_R2"]))
             config["test_R2"].append(np.mean(running_loss["test_R2"]))
+            config["temporal_encoder"] = model.temporal_encoder.__class__.__name__
             print(
                 f"{4*' '}Train Loss: {config['train_loss'][-1]:.3f}, Test Loss: {config['test_loss'][-1]:.3f}"
             )
