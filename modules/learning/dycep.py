@@ -3,7 +3,6 @@ from modules.learning.time_encoders.transformer import TransformerEncoder
 import torch.nn as nn
 from einops import rearrange
 from torchvision import models
-
 from modules.learning.models import CNN
 import numpy as np
 
@@ -24,6 +23,7 @@ class DYCEP(nn.Module):
         mamba_n_layers=6,
         freeze=False,
         vanilla_weights_dir="vanilla/coef_fourier.npy",
+        temporal_encoder = None
     ):
         super(DYCEP, self).__init__()
 
@@ -31,16 +31,19 @@ class DYCEP(nn.Module):
         self.spatial_encoder = CNN(in_channels=cnn_in_channels, out_channels=32)
         # turns off the prediction head
         self.spatial_encoder.prediction_head = nn.Identity()
-        if freeze:
-            self.spatial_encoder.freeze()
+        #if freeze:
+        #    self.spatial_encoder.freeze()
 
         # Linear layer to match the dimensionality of Z_1 to Z_2, from Space to Time
         self.fc_s2t = nn.Linear(self.spatial_encoder.z_dim, mamba_z_dim)
 
-        # Initialize Temporal Encoder with a Mamba Model
-        self.temporal_encoder = Mamba(
-            MambaConfig(mamba_z_dim, mamba_n_layers, d_state=16)
-        )
+        # Initialize Temporal Encoder with a Mamba Model or specified temporal encoder
+        if temporal_encoder is None:
+            self.temporal_encoder = Mamba(
+                MambaConfig(mamba_z_dim, mamba_n_layers, d_state=16)
+            )
+        else: 
+            self.temporal_encoder = temporal_encoder
 
         # MLP Prediction head to regress un-normlaized phase jumps
         self.delta_predictor = DeltaPredictor(mamba_z_dim)
