@@ -1,5 +1,5 @@
 from modules.learning.time_encoders.mamba import *
-from modules.learning.time_encoders.transformer import TransformerEncoder
+from modules.learning.time_encoders.transformer import SmallTransformerEncoder
 import torch.nn as nn
 from einops import rearrange
 from torchvision import models
