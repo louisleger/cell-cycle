@@ -110,6 +110,8 @@ class DYCEP(nn.Module):
         # z_2 shape = (B, S, Z_2)
         z_2 = self.temporal_encoder(self.fc_s2t(z_1))
 
+        if self.temporal_encoder.__class__.__name__ == "LSTM":
+            z_2 = z_2[0]
         # return shape = (B, S)
         phi = self.get_phi(z_2)
 
