@@ -1,6 +1,7 @@
 import os
 import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 import torch
 import numpy as np
 import argparse
@@ -12,9 +13,14 @@ from torch.utils.data import Dataset, DataLoader
 from torcheval.metrics import R2Score
 from modules.learning.dycep import DYCEP
 from torch.nn.utils.rnn import pad_sequence
+from dotenv import load_dotenv
+
+load_dotenv()
+print(os.getenv("PYTORCH_CUDA_ALLOC_CONF"))  # Prints "expandable_segments:True"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DATA_PATH = "/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/0-RPE-cell-timelapse/"
+
 
 # PyTorch Dataset Class for loading cell track datasets
 class track_dataset(Dataset):
@@ -43,7 +49,10 @@ class track_dataset(Dataset):
         if self.random_len:
             slice_len = np.random.randint(self.slice_len, labels.shape[0] - 1)
         x = np.random.randint(0, labels.shape[0] - slice_len)
-        return (imgs[x : x + slice_len], labels[x : x + slice_len],)  # minimum 2h of images
+        return (
+            imgs[x : x + slice_len],
+            labels[x : x + slice_len],
+        )  # minimum 2h of images
 
     def __getitem__(self, idx):
         # Load images and labels, T (time) x C x H x W
@@ -66,6 +75,7 @@ class track_dataset(Dataset):
     def __len__(self):
         return len(self.cells)
 
+
 def collate_fn(batch):
     # batch is a list of tuples: (name, imgs, labels)
     names = [track[0] for track in batch]
@@ -73,9 +83,10 @@ def collate_fn(batch):
     labels = [track[2] for track in batch]
 
     imgs_padded = pad_sequence(imgs, batch_first=True, padding_value=-100)
-    labels_padded = pad_sequence(labels, batch_first=True, padding_value=-1) 
-    
+    labels_padded = pad_sequence(labels, batch_first=True, padding_value=-1)
+
     return names, imgs_padded, labels_padded, labels_padded != -1
+
 
 def train_model(
     directory,
@@ -86,7 +97,10 @@ def train_model(
     batch_size=1,
     learning_rate=1e-4,
     weights_dir="",
-    slice_p=0, slice_len=1, random_len=False,):
+    slice_p=0,
+    slice_len=1,
+    random_len=False,
+):
     # Setting up a configuration json file
     config = {
         "number": len(os.listdir(weights_dir + "weights/")),
@@ -101,6 +115,8 @@ def train_model(
         "test_loss": [],
         "train_R2": [],
         "test_R2": [],
+        "temporal_encoder": model.temporal_encoder.__class__.__name__,
+        "partial_track_prob": slice_p,
     }
     # Setting up data loaders
     train_Dataset = track_dataset(
@@ -139,20 +155,27 @@ def train_model(
     )
 
     # Setting up objective function and optimizer
-    #loss_function = nn.MSELoss()  # We could try different things for this
+    # loss_function = nn.MSELoss()  # We could try different things for this
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
     score = R2Score().to(DEVICE)
     model.to(DEVICE)
-    
+
     try:
         for epoch in range(num_epochs):
             model.train()
             print(f"Epoch {epoch+1}/{num_epochs}")
             running_loss = {"train": [], "test": [], "train_R2": [], "test_R2": []}
+            i = 0
             # Iterate through elements of training dataset
             for name, inputs, labels, mask in tqdm(train_loader):
                 # Attach inputs and labels to device
-                inputs, labels, mask = inputs.to(DEVICE), labels.to(DEVICE), mask.to(DEVICE)
+
+                inputs, labels, mask = (
+                    inputs.to(DEVICE),
+                    labels.to(DEVICE),
+                    mask.to(DEVICE),
+                )
+
                 # Reset optimizer gradients
                 optimizer.zero_grad()
                 # Forward pass
@@ -174,11 +197,15 @@ def train_model(
             model.eval()
             with torch.no_grad():
                 for name, inputs, labels, mask in tqdm(test_loader):
-                    inputs, labels, mask = inputs.to(DEVICE), labels.to(DEVICE), mask.to(DEVICE)
+                    inputs, labels, mask = (
+                        inputs.to(DEVICE),
+                        labels.to(DEVICE),
+                        mask.to(DEVICE),
+                    )
                     outputs = model(inputs)
 
                     outputs, labels = outputs[mask], labels[mask]
-                    
+
                     loss = ((outputs - labels) ** 2).mean()
                     score.update(outputs, labels)
                     running_loss["test"].append(loss.item())
@@ -189,9 +216,12 @@ def train_model(
             config["test_loss"].append(np.mean(running_loss["test"]))
             config["train_R2"].append(np.mean(running_loss["train_R2"]))
             config["test_R2"].append(np.mean(running_loss["test_R2"]))
-            config["temporal_encoder"] = model.temporal_encoder.__class__.__name__
-            print(f"{4*' '}Train Loss: {config['train_loss'][-1]:.3f}, Test Loss: {config['test_loss'][-1]:.3f}")
-            print(f"{4*' '}Train R2: {config['train_R2'][-1]:.3f}, Test R2: {config['test_R2'][-1]:.3f}")
+            print(
+                f"{4*' '}Train Loss: {config['train_loss'][-1]:.3f}, Test Loss: {config['test_loss'][-1]:.3f}"
+            )
+            print(
+                f"{4*' '}Train R2: {config['train_R2'][-1]:.3f}, Test R2: {config['test_R2'][-1]:.3f}"
+            )
             config["num_epochs"] += 1
         save_config(config, model, weights_dir)
     except KeyboardInterrupt:
@@ -199,35 +229,84 @@ def train_model(
     return "Done!"
 
 
-def get_model(spatial_encoder, temporal_encoder, physics_informed):
+def get_model(args):
 
-    # TODO: implement if-statements/effective way to swap between spatial, temporal encoders or architecture changes
-    model = DYCEP(cnn_in_channels=1)
+    if args.temporal_encoder == "mamba":
+        from modules.learning.time_encoders.mamba import Mamba, MambaConfig
+
+        temporal_encoder = Mamba(
+            MambaConfig(
+                args.temporal_encoder_dim, args.temporal_encoder_layers, d_state=16
+            )
+        )
+    elif args.temporal_encoder == "transformer":
+        temporal_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=args.temporal_encoder_dim,
+                nhead=8,
+                dim_feedforward=args.temporal_encoder_dim * 2,
+                batch_first=True,
+            ),
+            num_layers=args.temporal_encoder_layers - 1,
+        )
+    elif args.temporal_encoder == "LSTM":
+        temporal_encoder = nn.LSTM(
+            input_size=args.temporal_encoder_dim,
+            hidden_size=args.temporal_encoder_dim,
+            num_layers=args.temporal_encoder_layers,
+            batch_first=True,
+            bidirectional=False,
+        )
+
+    model = DYCEP(
+        cnn_in_channels=len(args.in_channels),
+        temporal_encoder=temporal_encoder,
+        freeze=args.freeze,
+    )
     return model
+
 
 if __name__ == "__main__":
     # Sanity checks on shapes and stuff
     parser = argparse.ArgumentParser(description="Train a cell cycle model")
 
-    parser.add_argument("--dataset_path", type=str, default="track_datasets/control_mm/", help="dataset path")
-    parser.add_argument("--save_path", type=str, default="/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/0-RPE-cell-timelapse/datasets/")
+    parser.add_argument(
+        "--dataset_path",
+        type=str,
+        default="track_datasets/control_mm/",
+        help="dataset path",
+    )
+    parser.add_argument(
+        "--save_path",
+        type=str,
+        default="/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/0-RPE-cell-timelapse/datasets/",
+    )
     parser.add_argument("--spatial_encoder", type=str, default="custom_cnn")
     parser.add_argument("--temporal_encoder", type=str, default="mamba")
     parser.add_argument("--physics_informed", type=bool, default=True)
     parser.add_argument("--name", type=str, default="DYCEP")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
-    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=5)
+    parser.add_argument("--in_channels", type=int, default=[1])
+    parser.add_argument("--temporal_encoder_dim", type=int, default=256)
+    parser.add_argument("--temporal_encoder_layers", type=int, default=6)
+    parser.add_argument("--freeze", type=bool, default=False)
+    parser.add_argument("--slice_p", type=float, default=0)
+    # partial tracks trianing arguments
+    parser.add_argument("--slice_len", type=int, default=20)
+    parser.add_argument("--random_len", type=bool, default=False)
     args = parser.parse_args()
-    
-    model = get_model(args.spatial_encoder, args.temporal_encoder, args.physics_informed)
+
+    model = get_model(args)
+
     train_model(
-                DATA_PATH + args.dataset_path,
-                model=model,
-                img_channels=[1],
-                batch_size=args.batch_size,
-                learning_rate=args.learning_rate,
-                name=args.name,
-                num_epochs=args.epochs,
-                )
+        DATA_PATH + args.dataset_path,
+        model=model,
+        img_channels=args.in_channels,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        name=args.name,
+        num_epochs=args.epochs,
+    )
     print("All Done!")

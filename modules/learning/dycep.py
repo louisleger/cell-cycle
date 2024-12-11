@@ -19,6 +19,7 @@ class DYCEP(nn.Module):
     def __init__(
         self,
         cnn_in_channels=1,
+        # maybe remove these two args
         mamba_z_dim=256,
         mamba_n_layers=6,
         freeze=False,
@@ -110,6 +111,8 @@ class DYCEP(nn.Module):
         # z_2 shape = (B, S, Z_2)
         z_2 = self.temporal_encoder(self.fc_s2t(z_1))
 
+        if self.temporal_encoder.__class__.__name__ == "LSTM":
+            z_2 = z_2[0]
         # return shape = (B, S)
         phi = self.get_phi(z_2)
 
