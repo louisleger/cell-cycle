@@ -19,6 +19,7 @@ class DYCEP(nn.Module):
     def __init__(
         self,
         cnn_in_channels=1,
+        # maybe remove these two args
         mamba_z_dim=256,
         mamba_n_layers=6,
         freeze=False,
