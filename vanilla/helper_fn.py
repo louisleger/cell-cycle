@@ -47,17 +47,75 @@ def linear_regression(x, y, n_harmonics=10):
     return coeffs, y_fit
 
 
-# define the function that will reconstruct the signal, using the coefficients
-def reconstruct_signal(x, coeffs, n_harmonics):
-    m = len(x)
-    A = np.ones((m, 1 + 2 * n_harmonics))  # include column for intercept
+# # old version of the vannila fn
+# def reconstruct_signal(x, coeffs, n_harmonics):
+#     m = len(x)
+#     A = np.ones((m, 1 + 2 * n_harmonics))  # include column for intercept
 
-    for k in range(1, n_harmonics + 1):
-        A[:, 2 * k - 1] = np.cos(2 * np.pi * k * x)  # cosine terms
-        A[:, 2 * k] = np.sin(2 * np.pi * k * x)  # sine terms
+#     for k in range(1, n_harmonics + 1):
+#         A[:, 2 * k - 1] = np.cos(2 * np.pi * k * x)  # cosine terms
+#         A[:, 2 * k] = np.sin(2 * np.pi * k * x)  # sine terms
 
-    y_fit = A.dot(coeffs)
-    return y_fit
+#     y_fit = A.dot(coeffs)
+#     return y_fit
+
+
+def vanilla_fn(
+    tau,
+    coeffs,
+):
+    """
+    returns vanilla_fn(tau) given the fourier coefficients
+    """
+
+    n_harmonics = (coeffs.shape[0] - 1) // 2
+    k_values = np.arange(1, n_harmonics + 1)
+
+    # Fourier Design Matrix
+    A = np.ones((tau.shape[0], 1 + 2 * n_harmonics))
+
+    cosine_terms = np.cos(2 * np.pi * k_values[None, :] * tau[:, None])
+    sine_terms = np.sin(2 * np.pi * k_values[None, :] * tau[:, None])
+    A[:, 1::2] = cosine_terms
+    A[:, 2::2] = sine_terms
+
+    # Get Vanilla Prediction
+    # vanilla_prediction = A @ coeffs
+    vanilla_prediction = np.einsum("sp,pf->sf", A, coeffs)
+
+    return vanilla_prediction
+
+
+def normalize_ref(path, ref_len):
+    """
+    Normalizes the reference column (first column) of a path
+    """
+    path = path.astype(float)
+    path[:, 0] = path[:, 0] / ref_len
+    return path
+
+
+def phase_map(path, ref_len):
+    """
+    This function takes the output of the warping path of ref (or phase) and input:
+    - normalizes the reference path (which is the first column of the path)
+    and supposed to span the entire cycle (CC phase)
+    - calculates the phase map of the second column of the path, making sure
+    that every time the input is mapped to more than one phase value, the mean
+    of the phase values is returned
+
+    Returns:
+    - the phase of each input value
+    """
+
+    path = normalize_ref(path, ref_len)
+    phase, input = path[:, 0], path[:, 1]
+    input_u = np.unique(input)
+
+    out = np.zeros(input_u.shape)
+    for i, val in enumerate(input_u):
+        out[i] = phase[input == val].mean()
+    return out
 
 
 ###########
@@ -141,3 +199,26 @@ def class_duration(class_vec):
     """
     _, durations = np.unique(class_vec[:, 1], return_counts=True)
     return durations
+
+
+def vanilla_fn(
+    tau,
+    coeffs,
+):
+
+    n_harmonics = (coeffs.shape[0] - 1) // 2
+    k_values = np.arange(1, n_harmonics + 1)
+
+    # Fourier Design Matrix
+    A = np.ones((tau.shape[0], 1 + 2 * n_harmonics))
+
+    cosine_terms = np.cos(2 * np.pi * k_values[None, :] * tau[:, None])
+    sine_terms = np.sin(2 * np.pi * k_values[None, :] * tau[:, None])
+    A[:, 1::2] = cosine_terms
+    A[:, 2::2] = sine_terms
+
+    # Get Vanilla Prediction
+    # vanilla_prediction = A @ coeffs
+    vanilla_prediction = np.einsum("sp,pf->sf", A, coeffs)
+
+    return vanilla_prediction

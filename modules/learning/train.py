@@ -294,7 +294,7 @@ if __name__ == "__main__":
     parser.add_argument("--freeze", type=bool, default=False)
     parser.add_argument("--slice_p", type=float, default=0)
     # partial tracks trianing arguments
-    parser.add_argument("--slice_len", type=int, default=20)
+    parser.add_argument("--slice_len", type=int, default=1)
     parser.add_argument("--random_len", type=bool, default=False)
     args = parser.parse_args()
 
@@ -308,5 +308,8 @@ if __name__ == "__main__":
         learning_rate=args.learning_rate,
         name=args.name,
         num_epochs=args.epochs,
+        slice_p=args.slice_p,
+        slice_len=args.slice_len,
+        random_len=args.random_len,
     )
     print("All Done!")
