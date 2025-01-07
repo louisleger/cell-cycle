@@ -14,6 +14,8 @@ from torcheval.metrics import R2Score
 from modules.learning.dycep import DYCEP
 from torch.nn.utils.rnn import pad_sequence
 from dotenv import load_dotenv
+import datetime
+
 
 load_dotenv()
 print(os.getenv("PYTORCH_CUDA_ALLOC_CONF"))  # Prints "expandable_segments:True"
@@ -22,17 +24,46 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DATA_PATH = "/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/0-RPE-cell-timelapse/"
 
 
+def format_date_yyyymmddhhmm(datetime_obj):
+    """
+    Formats a datetime object into a string with the format YYYYMMDDHHMM.
+
+    Args:
+      datetime_obj: A datetime.datetime object.
+
+    Returns:
+      A string representing the date and time in YYYYMMDDHHMM format.
+    """
+    return datetime_obj.strftime("%Y_%m_%d_%H_%M")
+
+
 # PyTorch Dataset Class for loading cell track datasets
 class track_dataset(Dataset):
     def __init__(
-        self, directory, img_channels=[0], slice_p=0, slice_len=1, random_len=False
+        self,
+        directory,
+        use_embeddings=False,
+        img_channels=[0],
+        slice_p=0,
+        slice_len=1,
+        random_len=False,
     ):
         # Save track directory and list of cell names
         self.img_directory = directory + "images/"
         self.label_directory = directory + "labels/"
-        self.cells = [
-            cell for cell in os.listdir(self.img_directory) if cell != "nan.npy"
-        ]
+        self.embeddings_directory = directory + "embeddings/"
+        self.use_embeddings = use_embeddings
+
+        if use_embeddings:
+            self.cells = [
+                cell
+                for cell in os.listdir(self.embeddings_directory)
+                if cell != "nan.npy"
+            ]
+        else:
+            self.cells = [
+                cell for cell in os.listdir(self.img_directory) if cell != "nan.npy"
+            ]
 
         # Save selection of specific channels for images from [PC, BF, H2B]
         self.img_channels = img_channels
@@ -55,22 +86,40 @@ class track_dataset(Dataset):
         )  # minimum 2h of images
 
     def __getitem__(self, idx):
-        # Load images and labels, T (time) x C x H x W
-        imgs = torch.tensor(
-            np.load(self.img_directory + self.cells[idx], allow_pickle=True),
-            dtype=torch.float32,
-        )[:, self.img_channels, :, :]
-        # Load labels, T x F (fucci = 2)
-        labels = torch.tensor(
-            np.load(self.label_directory + self.cells[idx]).reshape(2, -1).T,
-            dtype=torch.float32,
-        )
 
-        # Augmentation
-        imgs = self.intensity_shift(imgs)
-        if np.random.rand() < self.slice_p and labels.shape[0] > self.slice_len:
-            imgs, labels = self.random_slice(imgs, labels)
-        return self.cells[idx], imgs, labels
+        if self.use_embeddings:
+            # Load embeddings S x 768 and labels, S x F (fucci = 2)
+            embeddings = torch.tensor(
+                np.load(self.embeddings_directory + self.cells[idx], allow_pickle=True),
+                dtype=torch.float32,
+            )
+            labels = torch.tensor(
+                np.load(self.label_directory + self.cells[idx]).reshape(2, -1).T,
+                dtype=torch.float32,
+            )
+
+            if np.random.rand() < self.slice_p and labels.shape[0] > self.slice_len:
+                imgs, embeddings = self.random_slice(imgs, embeddings)
+            return self.cells[idx], embeddings, labels
+
+        else:
+
+            # Load images and labels, S (time) x C x H x W
+            imgs = torch.tensor(
+                np.load(self.img_directory + self.cells[idx], allow_pickle=True),
+                dtype=torch.float32,
+            )[:, self.img_channels, :, :]
+            # Load labels, T x F (fucci = 2)
+            labels = torch.tensor(
+                np.load(self.label_directory + self.cells[idx]).reshape(2, -1).T,
+                dtype=torch.float32,
+            )
+            # Augmentation
+            imgs = self.intensity_shift(imgs)
+
+            if np.random.rand() < self.slice_p and labels.shape[0] > self.slice_len:
+                imgs, labels = self.random_slice(imgs, labels)
+            return self.cells[idx], imgs, labels
 
     def __len__(self):
         return len(self.cells)
@@ -93,6 +142,7 @@ def train_model(
     model,
     name,
     num_epochs=30,
+    use_embeddings=False,
     img_channels=[0, 0, 0],
     batch_size=1,
     learning_rate=1e-4,
@@ -101,9 +151,11 @@ def train_model(
     slice_len=1,
     random_len=False,
 ):
+    now = datetime.datetime.now()
+    formatted_datetime = format_date_yyyymmddhhmm(now)
     # Setting up a configuration json file
     config = {
-        "number": len(os.listdir(weights_dir + "weights/")),
+        "number": formatted_datetime,
         "path": weights_dir + "weights/",
         "name": name,
         "model_type": str(type(model)),
@@ -125,6 +177,7 @@ def train_model(
         slice_p=slice_p,
         slice_len=slice_len,
         random_len=random_len,
+        use_embeddings=use_embeddings,
     )
 
     test_Dataset = track_dataset(
@@ -133,6 +186,7 @@ def train_model(
         slice_p=slice_p,
         slice_len=slice_len,
         random_len=random_len,
+        use_embeddings=use_embeddings,
     )
 
     # Create DataLoaders for train and test datasets
@@ -167,7 +221,8 @@ def train_model(
             running_loss = {"train": [], "test": [], "train_R2": [], "test_R2": []}
             i = 0
             # Iterate through elements of training dataset
-            for name, inputs, labels, mask in tqdm(train_loader):
+            # for name, inputs, labels, mask in tqdm(train_loader):
+            for name, inputs, labels, mask in train_loader:
                 # Attach inputs and labels to device
 
                 inputs, labels, mask = (

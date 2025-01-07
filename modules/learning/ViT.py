@@ -25,9 +25,9 @@ sys.path.append("..")
 #############
 
 
-fucci_path = PATH + "track_datasets/control_mm/train/labels/"
-track_path = PATH + "track_datasets/control_mm/train/images/"
-embedding_path = PATH + "track_datasets/control_mm/train/embeddings/"
+fucci_path = PATH + "track_datasets/control_mm/test/labels/"
+track_path = PATH + "track_datasets/control_mm/test/images/"
+embedding_path = PATH + "track_datasets/control_mm/test/embeddings/"
 in_channels = [1, 1, 1]
 bf_channel = 1
 
