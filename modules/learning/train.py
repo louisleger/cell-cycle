@@ -12,8 +12,11 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from torcheval.metrics import R2Score
 from modules.learning.dycep import DYCEP
+from modules.learning.dycep_vit import DYCEP2
 from torch.nn.utils.rnn import pad_sequence
 from dotenv import load_dotenv
+import datetime, time
+
 
 load_dotenv()
 print(os.getenv("PYTORCH_CUDA_ALLOC_CONF"))  # Prints "expandable_segments:True"
@@ -22,17 +25,40 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DATA_PATH = "/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/0-RPE-cell-timelapse/"
 
 
+def format_date_yyyymmddhhmm(datetime_obj):
+    """
+    Formats a datetime object into a string with the format YYYYMMDDHHMM.
+    """
+    return datetime_obj.strftime("%Y_%m_%d_%H_%M")
+
+
 # PyTorch Dataset Class for loading cell track datasets
 class track_dataset(Dataset):
     def __init__(
-        self, directory, img_channels=[0], slice_p=0, slice_len=1, random_len=False
+        self,
+        directory,
+        use_embeddings=False,
+        img_channels=[0],
+        slice_p=0,
+        slice_len=1,
+        random_len=False,
     ):
         # Save track directory and list of cell names
         self.img_directory = directory + "images/"
         self.label_directory = directory + "labels/"
-        self.cells = [
-            cell for cell in os.listdir(self.img_directory) if cell != "nan.npy"
-        ]
+        self.embeddings_directory = directory + "embeddings/"
+        self.use_embeddings = use_embeddings
+
+        if use_embeddings:
+            self.cells = [
+                cell
+                for cell in os.listdir(self.embeddings_directory)
+                if cell != "nan.npy"
+            ]
+        else:
+            self.cells = [
+                cell for cell in os.listdir(self.img_directory) if cell != "nan.npy"
+            ]
 
         # Save selection of specific channels for images from [PC, BF, H2B]
         self.img_channels = img_channels
@@ -55,22 +81,40 @@ class track_dataset(Dataset):
         )  # minimum 2h of images
 
     def __getitem__(self, idx):
-        # Load images and labels, T (time) x C x H x W
-        imgs = torch.tensor(
-            np.load(self.img_directory + self.cells[idx], allow_pickle=True),
-            dtype=torch.float32,
-        )[:, self.img_channels, :, :]
-        # Load labels, T x F (fucci = 2)
-        labels = torch.tensor(
-            np.load(self.label_directory + self.cells[idx]).reshape(2, -1).T,
-            dtype=torch.float32,
-        )
 
-        # Augmentation
-        imgs = self.intensity_shift(imgs)
-        if np.random.rand() < self.slice_p and labels.shape[0] > self.slice_len:
-            imgs, labels = self.random_slice(imgs, labels)
-        return self.cells[idx], imgs, labels
+        if self.use_embeddings:
+            # Load embeddings S x 768 and labels, S x F (fucci = 2)
+            embeddings = torch.tensor(
+                np.load(self.embeddings_directory + self.cells[idx], allow_pickle=True),
+                dtype=torch.float32,
+            )
+            labels = torch.tensor(
+                np.load(self.label_directory + self.cells[idx]).reshape(2, -1).T,
+                dtype=torch.float32,
+            )
+
+            if np.random.rand() < self.slice_p and labels.shape[0] > self.slice_len:
+                embeddings, labels = self.random_slice(embeddings, labels)
+            return self.cells[idx], embeddings, labels
+
+        else:
+
+            # Load images and labels, S (time) x C x H x W
+            imgs = torch.tensor(
+                np.load(self.img_directory + self.cells[idx], allow_pickle=True),
+                dtype=torch.float32,
+            )[:, self.img_channels, :, :]
+            # Load labels, T x F (fucci = 2)
+            labels = torch.tensor(
+                np.load(self.label_directory + self.cells[idx]).reshape(2, -1).T,
+                dtype=torch.float32,
+            )
+            # Augmentation
+            imgs = self.intensity_shift(imgs)
+
+            if np.random.rand() < self.slice_p and labels.shape[0] > self.slice_len:
+                imgs, labels = self.random_slice(imgs, labels)
+            return self.cells[idx], imgs, labels
 
     def __len__(self):
         return len(self.cells)
@@ -93,18 +137,39 @@ def train_model(
     model,
     name,
     num_epochs=30,
+    use_embeddings=False,
     img_channels=[0, 0, 0],
     batch_size=1,
     learning_rate=1e-4,
-    weights_dir="",
+    weights_dir="weights/",
     slice_p=0,
     slice_len=1,
     random_len=False,
 ):
+    """
+    Trains the model on the dataset located at directory.
+    Saves the model weights and training configuration in weights_dir.
+
+    Parameters:
+    directory: str, path to the dataset
+    model: nn.Module, the model to train
+    name: str, name of the model
+    num_epochs: int, number of epochs to train
+    use_embeddings: bool, whether to use embeddings or images
+    img_channels: list, channels to use from the images
+    batch_size: int, batch size
+    learning_rate: float, learning rate
+    weights_dir: str, path to save the weights
+    slice_p: float, probability to slice the track
+    slice_len: int, minimum length of the slice
+    random_len: bool, whether to use random length slices
+    """
+    now = datetime.datetime.now()
+    formatted_datetime = format_date_yyyymmddhhmm(now)
     # Setting up a configuration json file
     config = {
-        "number": len(os.listdir(weights_dir + "weights/")),
-        "path": weights_dir + "weights/",
+        "number": formatted_datetime,
+        "path": weights_dir,
         "name": name,
         "model_type": str(type(model)),
         "img_channels": img_channels,
@@ -117,6 +182,7 @@ def train_model(
         "test_R2": [],
         "temporal_encoder": model.temporal_encoder.__class__.__name__,
         "partial_track_prob": slice_p,
+        "training_time": 0,
     }
     # Setting up data loaders
     train_Dataset = track_dataset(
@@ -125,6 +191,7 @@ def train_model(
         slice_p=slice_p,
         slice_len=slice_len,
         random_len=random_len,
+        use_embeddings=use_embeddings,
     )
 
     test_Dataset = track_dataset(
@@ -133,6 +200,7 @@ def train_model(
         slice_p=slice_p,
         slice_len=slice_len,
         random_len=random_len,
+        use_embeddings=use_embeddings,
     )
 
     # Create DataLoaders for train and test datasets
@@ -159,6 +227,8 @@ def train_model(
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
     score = R2Score().to(DEVICE)
     model.to(DEVICE)
+
+    start_time = time.time()
 
     try:
         for epoch in range(num_epochs):
@@ -223,6 +293,8 @@ def train_model(
                 f"{4*' '}Train R2: {config['train_R2'][-1]:.3f}, Test R2: {config['test_R2'][-1]:.3f}"
             )
             config["num_epochs"] += 1
+        end_time = time.time()
+        config["training_time"] = end_time - start_time
         save_config(config, model, weights_dir)
     except KeyboardInterrupt:
         save_config(config, model, weights_dir)
@@ -258,10 +330,11 @@ def get_model(args):
             bidirectional=False,
         )
 
-    model = DYCEP(
-        cnn_in_channels=len(args.in_channels),
+    model = DYCEP2(
+        # cnn_in_channels=len(args.in_channels),
         temporal_encoder=temporal_encoder,
-        freeze=args.freeze,
+        vanilla_weights_dir=args.vanilla_weights_dir,
+        # freeze=args.freeze,
     )
     return model
 
@@ -284,18 +357,23 @@ if __name__ == "__main__":
     parser.add_argument("--spatial_encoder", type=str, default="custom_cnn")
     parser.add_argument("--temporal_encoder", type=str, default="mamba")
     parser.add_argument("--physics_informed", type=bool, default=True)
-    parser.add_argument("--name", type=str, default="DYCEP")
+    parser.add_argument("--use_embeddings", type=bool, default=False)
+    parser.add_argument("--name", type=str, default="DYCEP2")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
-    parser.add_argument("--batch_size", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--in_channels", type=int, default=[1])
     parser.add_argument("--temporal_encoder_dim", type=int, default=256)
     parser.add_argument("--temporal_encoder_layers", type=int, default=6)
     parser.add_argument("--freeze", type=bool, default=False)
     parser.add_argument("--slice_p", type=float, default=0)
-    # partial tracks trianing arguments
-    parser.add_argument("--slice_len", type=int, default=20)
+    # partial tracks training arguments
+    parser.add_argument("--slice_len", type=int, default=1)
     parser.add_argument("--random_len", type=bool, default=False)
+    parser.add_argument(
+        "--vanilla_weights_dir", type=str, default="vanilla/coef_fourier.npy"
+    )
+
     args = parser.parse_args()
 
     model = get_model(args)
@@ -308,5 +386,9 @@ if __name__ == "__main__":
         learning_rate=args.learning_rate,
         name=args.name,
         num_epochs=args.epochs,
+        slice_p=args.slice_p,
+        slice_len=args.slice_len,
+        random_len=args.random_len,
+        use_embeddings=args.use_embeddings,
     )
     print("All Done!")
