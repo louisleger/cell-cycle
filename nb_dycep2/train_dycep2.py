@@ -17,7 +17,6 @@ track_path = PATH + "track_datasets/control_mm/train/images/"
 label_path = PATH + "track_datasets/control_mm/train/labels/"
 embeddings_path = PATH + "track_datasets/control_mm/train/embeddings/"
 
-in_channels = [1]
 # training mamba model
 model = DYCEP2()
 model.to(DEVICE)
@@ -48,14 +47,10 @@ zz = model.forward(emb[None, :, :])
 train_model(
     directory=PATH + "track_datasets/control_mm/",
     model=model,
-    # pass [1] for only BF channel, or [1,1,1] for 3 times the same channel
-    # or [0,1,2] for all channels
     use_embeddings=True,
-    img_channels=in_channels,
-    batch_size=5,
-    learning_rate=1e-5,
-    slice_p=0.5,
-    slice_len=20,
+    batch_size=1,
+    learning_rate=1e-4,
+    slice_p=0.0,
     random_len=True,
     name="DYCEP",
     num_epochs=1,

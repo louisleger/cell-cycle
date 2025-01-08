@@ -14,7 +14,7 @@ def tensor_to_array(x):
 
 # Function to save the running training configuration and model
 def save_config(config, model, config_dir):
-    with open(f'{config_dir}weights/config-{config["number"]}.json', "w") as file:
+    with open(f'{config_dir}config-{config["number"]}.json', "w") as file:
         json.dump(config, file, indent=4)
     torch.save(model.state_dict(), config["path"] + f'model-{config["number"]}.pt')
 

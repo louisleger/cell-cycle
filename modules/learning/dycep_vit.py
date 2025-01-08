@@ -21,8 +21,7 @@ class DYCEP2(nn.Module):
         # maybe remove these two args
         mamba_z_dim=256,
         mamba_n_layers=6,
-        # freeze=False,
-        vanilla_weights_dir="vanilla/coef_fourier.npy",
+        vanilla_weights_dir="../vanilla/coef_fourier.npy",
         temporal_encoder=None,
     ):
         super(DYCEP2, self).__init__()
