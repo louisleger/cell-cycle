@@ -1,9 +1,10 @@
 from modules.learning.time_encoders.mamba import *
-from modules.learning.time_encoders.transformer import SmallTransformerEncoder
+
+# from modules.learning.time_encoders.transformer import SmallTransformerEncoder
 import torch.nn as nn
 from einops import rearrange
 from torchvision import models
-from modules.learning.models import CNN
+from modules.learning.feature_extractors import CNN
 import numpy as np
 
 """"
