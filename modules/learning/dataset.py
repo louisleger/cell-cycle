@@ -43,7 +43,7 @@ class track_dataset(Dataset):
         else:
             self.cells = [
                 cell for cell in os.listdir(self.img_directory) if cell != "nan.npy"
-            ]
+            ][:100]
 
         # Load tracks in memory
         if load_in_memory: 
@@ -110,7 +110,7 @@ class track_dataset(Dataset):
             labels = np.load(self.label_directory + self.cells[idx]).reshape(2, -1).T
 
             # Augmentation
-            #imgs = self.aug(imgs)
+            imgs = self.aug(imgs)
             imgs, labels = torch.tensor(imgs.copy(), dtype=torch.float32), torch.tensor(labels, dtype=torch.float32)
 
             if np.random.rand() < self.slice_p and labels.shape[0] > self.slice_len:
