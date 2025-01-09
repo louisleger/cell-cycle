@@ -1,23 +1,21 @@
-from transformers import AutoModel
 import torch
-from torch.utils.data import DataLoader, Dataset
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from transformers import AutoFeatureExtractor, SwinModel
 import numpy as np
+import sys
+sys.path.append("../../")
+from modules.learning.feature_extractors import swin_transformer
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-feature_extractor = AutoFeatureExtractor.from_pretrained(
-    "microsoft/swin-tiny-patch4-window7-224"
-)
-model = SwinModel.from_pretrained("microsoft/swin-tiny-patch4-window7-224")
-model.to(DEVICE)
+# feature_extractor = AutoFeatureExtractor.from_pretrained(
+#     "microsoft/swin-tiny-patch4-window7-224"
+# )
+# model = SwinModel.from_pretrained("microsoft/swin-tiny-patch4-window7-224")
+# model.to(DEVICE)
 
 PATH = "/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/0-RPE-cell-timelapse/"
-import sys
-
-sys.path.append("..")
 
 
 #############
@@ -25,30 +23,53 @@ sys.path.append("..")
 #############
 
 
-fucci_path = PATH + "track_datasets/control_mm/test/labels/"
-track_path = PATH + "track_datasets/control_mm/test/images/"
-embedding_path = PATH + "track_datasets/control_mm/test/embeddings/"
+fucci_path = PATH + "track_datasets/control_mm/train/labels/"
+track_path = PATH + "track_datasets/control_mm/train/images/"
+embedding_path = PATH + "track_datasets/control_mm/train/embeddings/"
 in_channels = [1, 1, 1]
 bf_channel = 1
 
-import os
+track_name = "0607.1629.npy"
+img = np.load(track_path + track_name, allow_pickle=True)
+imgg = img[0, in_channels, :, :]
 
-cells = os.listdir(track_path)[:]
-cells_done = os.listdir(embedding_path)[:]
+print(imgg.shape)
 
-# check intersection and difference of cells
-intersection = set(cells) & set(cells_done)
-difference = set(cells) - set(cells_done)
+plt.imshow(img[0, 0, :, :])
 
-print(f"Cells done: {len(intersection)}")
-print(f"Cells to do: {len(difference)}")
-print(f"Total cells: {len(cells)} sum = {len(intersection) + len(difference)}")
+model = swin_transformer()
+model.to(DEVICE)
 
-difference = list(difference)
+model(imgg)
 
-#############
-# model
-#############
+
+
+
+
+
+
+
+
+
+
+# import os
+
+# cells = os.listdir(track_path)[:]
+# cells_done = os.listdir(embedding_path)[:]
+
+# # check intersection and difference of cells
+# intersection = set(cells) & set(cells_done)
+# difference = set(cells) - set(cells_done)
+
+# print(f"Cells done: {len(intersection)}")
+# print(f"Cells to do: {len(difference)}")
+# print(f"Total cells: {len(cells)} sum = {len(intersection) + len(difference)}")
+
+# difference = list(difference)
+
+# #############
+# # model
+# #############
 
 
 for cell in tqdm(difference):

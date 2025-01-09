@@ -3,6 +3,7 @@ from modules.learning.time_encoders.transformer import SmallTransformerEncoder
 import torch.nn as nn
 from einops import rearrange
 from torchvision import models
+from modules.learning.feature_extractors import swin_transformer
 
 import numpy as np
 
@@ -14,19 +15,17 @@ New model, better suited for phase inference
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-# Dynamic Cellular Phase Model, proposal and proof of concept
 class DYCEP2(nn.Module):
     def __init__(
         self,
-        # maybe remove these two args
-        mamba_z_dim=256,
-        mamba_n_layers=6,
         vanilla_weights_dir="../vanilla/coef_fourier.npy",
+        spatial_encoder=swin_transformer(),
+        spatial_z_dim=768,
         temporal_encoder=None,
     ):
         super(DYCEP2, self).__init__()
 
-        self.z_dim = 768
+        self.z_dim = spatial_z_dim
 
         # Linear layer to match the dimensionality of Z_1 to Z_2, from Space to Time
         self.fc_s2t = nn.Linear(self.z_dim, mamba_z_dim)
@@ -147,3 +146,14 @@ class DeltaPredictor(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+
+from transformers import AutoFeatureExtractor, SwinModel
+
+
+class swinDYCEP(nn.Module):
+
+    def __init__(
+        self, dycep_model, swin_model_name="microsoft/swin-tiny-patch4-window7-224"
+    ):
+        super(swinDYCEP, self).__init__()
