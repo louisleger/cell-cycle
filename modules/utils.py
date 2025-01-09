@@ -4,8 +4,14 @@ import numpy as np
 from scipy.stats import wasserstein_distance
 import matplotlib.pyplot as plt
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+def format_date_yyyymmddhhmm(datetime_obj):
+    """
+    Formats a datetime object into a string with the format YYYYMMDDHHMM.
+    """
+    return datetime_obj.strftime("%Y_%m_%d_%H_%M")
 
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Quick function to turn GPU PyTorch tensors from models to numpy arrays
 def tensor_to_array(x):
