@@ -5,6 +5,8 @@ import torch
 import os
 import sys
 from torch.nn.utils.rnn import pad_sequence
+from augmend import Augmend, FlipRot90, IntensityScaleShift, AdditiveNoise
+
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DATA_PATH = "/media/maxine/c8f4bcb2-c1fe-4676-877d-8e476418f5e5/0-RPE-cell-timelapse/"
@@ -45,10 +47,14 @@ class track_dataset(Dataset):
 
         # Load tracks in memory
         if load_in_memory: 
-            self.cells = [[self.cells, torch.tensor(np.load(self.img_directory + cell_name, allow_pickle=True), dtype=torch.float32)[:, self.img_channels, :, :],
-                            torch.tensor(np.load(self.label_directory + cell_name).reshape(2, -1).T,dtype=torch.float32)]
-                            for cell_name in self.cells]
+            self.cells = [[self.cells, np.load(self.img_directory + cell_name, allow_pickle=True)[:, self.img_channels, :, :],
+                            np.load(self.label_directory + cell_name).reshape(2, -1).T] for cell_name in self.cells]
             
+        # Augmend object
+        self.aug = Augmend()
+        self.aug.add(FlipRot90(axis=(2,3)), probability=0.8)
+        self.aug.add(IntensityScaleShift(), probability=0.8)
+        self.aug.add(AdditiveNoise(sigma=0.05), probability=0.2)
 
         # Probability to create an x-y slice of the track
         self.slice_p = slice_p
@@ -89,7 +95,8 @@ class track_dataset(Dataset):
             name, imgs, labels = tuple(self.cells[idx])
             
             # Augmentation
-            imgs = self.intensity_shift(imgs)
+            imgs = self.aug(imgs)
+            imgs, labels = torch.tensor(imgs, dtype=torch.float32), torch.tensor(labels, dtype=torch.float32)
 
             if np.random.rand() < self.slice_p and labels.shape[0] > self.slice_len:
                 imgs, labels = self.random_slice(imgs, labels)
@@ -98,17 +105,13 @@ class track_dataset(Dataset):
         else: 
 
             # Load images and labels, S (time) x C x H x W
-            imgs = torch.tensor(
-                np.load(self.img_directory + self.cells[idx], allow_pickle=True),
-                dtype=torch.float32,
-            )[:, self.img_channels, :, :]
+            imgs = np.load(self.img_directory + self.cells[idx], allow_pickle=True)[:, self.img_channels, :, :]
             # Load labels, T x F (fucci = 2)
-            labels = torch.tensor(
-                np.load(self.label_directory + self.cells[idx]).reshape(2, -1).T,
-                dtype=torch.float32,
-            )
+            labels = np.load(self.label_directory + self.cells[idx]).reshape(2, -1).T
+
             # Augmentation
-            imgs = self.intensity_shift(imgs)
+            #imgs = self.aug(imgs)
+            imgs, labels = torch.tensor(imgs.copy(), dtype=torch.float32), torch.tensor(labels, dtype=torch.float32)
 
             if np.random.rand() < self.slice_p and labels.shape[0] > self.slice_len:
                 imgs, labels = self.random_slice(imgs, labels)
