@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import matplotlib.pyplot as plt
 
 
 def get_data(path, modality, head):
@@ -69,7 +70,7 @@ def inverse_log_min_max(y, eps=0.01, log_base=np.e):
     return x
 
 
-def find_threshold_crossing(x, y, th):
+def find_crossing_green(x, y, th=0.03, return_idx=False):
     """
     Return the x-coordinate of the 'meaningful' threshold crossing.
     This is used to find the G1/S transitions.
@@ -90,12 +91,102 @@ def find_threshold_crossing(x, y, th):
         y_early = y[in_early_region]
         if np.all(y_early >= th):
             # Then the signal never dipped below threshold in [0, 0.15]
-            return 0
+            return 0, 0 if return_idx else 0
 
     # 2) Otherwise, we look for the first index i where x[i] > 0.15 and y[i] >= th
     crossing_indices = np.where((x > 0.15) & (y >= th))[0]
     if len(crossing_indices) == 0:
-        return None
+        return None, None if return_idx else None
 
     # Return the x-coordinate of the first crossing
-    return x[crossing_indices[0]]
+    if return_idx:
+        return x[crossing_indices[0]], crossing_indices[0]
+    else:
+        return x[crossing_indices[0]]
+
+
+def find_crossing_red(x, y, threshold=0.02, return_idx=False):
+    """
+    Return the x-coordinate where the signal first drops below `threshold`
+    after x > 0.5.
+    If no such drop is found, return None.
+    """
+    # Identify all indices where x > 0.5 and y < threshold
+    vanish_indices = np.where((x > 0.5) & (y < threshold))[0]
+    if len(vanish_indices) == 0:
+        return None, None if return_idx else None
+
+    if return_idx:
+        return x[vanish_indices[0]], vanish_indices[0]
+    else:
+        return x[vanish_indices[0]]
+
+
+def find_crossing_points(
+    taus: list,
+    tracks: list,
+    tr_green: float = 0.03,
+    tr_red: float = 0.02,
+):
+    """
+    Find the crossing points for the green and red signals.
+    """
+    n_tracks = len(tracks)
+    crossings = np.zeros((n_tracks, 2))
+    idx_crossings = np.zeros((n_tracks, 2))
+    return_idx = True
+
+    for i in range(n_tracks):
+        fucci_green = inverse_log_min_max(tracks[i][:, 0])
+        fucci_red = inverse_log_min_max(tracks[i][:, 1])
+
+        crossing_green, idx_green = find_crossing_green(
+            taus[i], fucci_green, tr_green, return_idx=return_idx
+        )
+        crossing_red, idx_red = find_crossing_red(
+            taus[i], fucci_red, tr_red, return_idx=return_idx
+        )
+        crossings[i] = crossing_green, crossing_red
+        idx_crossings[i] = idx_green, idx_red
+
+    return crossings, idx_crossings
+
+
+def vanilla_fn(
+    tau,
+    coeffs=None,
+):
+    """
+    returns vanilla_fn(tau) given the fourier coefficients
+    """
+    if coeffs is None:
+        coeffs = np.load("../vanilla/coef_fourier.npy")
+
+    n_harmonics = (coeffs.shape[0] - 1) // 2
+    k_values = np.arange(1, n_harmonics + 1)
+
+    # Fourier Design Matrix
+    A = np.ones((tau.shape[0], 1 + 2 * n_harmonics))
+
+    cosine_terms = np.cos(2 * np.pi * k_values[None, :] * tau[:, None])
+    sine_terms = np.sin(2 * np.pi * k_values[None, :] * tau[:, None])
+    A[:, 1::2] = cosine_terms
+    A[:, 2::2] = sine_terms
+
+    # Get Vanilla Prediction
+    # vanilla_prediction = A @ coeffs
+    vanilla_prediction = np.einsum("sp,pf->sf", A, coeffs)
+
+    return vanilla_prediction
+
+
+def plot_fucci(track, time="standard", delta_t=5, label=None):
+    if time == "standard":
+        t = np.arange(0, track.shape[0]) * delta_t
+        plt.xlabel("Time [min]")
+    elif time == "normalized":
+        t = np.arange(0, track.shape[0]) / track.shape[0]
+        plt.xlabel("normalized time")
+    plt.plot(t, track[:, 0], label=label, c="g")
+    plt.plot(t, track[:, 1], label=label, c="r")
+    plt.legend()
