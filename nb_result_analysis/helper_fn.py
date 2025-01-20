@@ -1,6 +1,15 @@
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score
+
+heads = ["mlp", "cnn", "lstm", "xtransformer-causal", "mamba", "xtransformer"]
+good_heads = ["mlp", "xtransformer-causal", "mamba", "xtransformer"]
+
+available_colors = ["#1f77b4", "brown", "purple", "#8c564b", "#9467bd", "orange"]
+head_colors = {
+    head: available_colors[i % len(available_colors)] for i, head in enumerate(heads)
+}
 
 
 def get_data(path, modality, head):
@@ -31,7 +40,7 @@ def get_data(path, modality, head):
     return tracks
 
 
-def mean_track_error(gt, tracks, metric="L1", av_channels=True):
+def mean_track_error(gt, tracks, metric="L1", av_channels=False, flatten=False):
     """
     Takes mean error between gt and tracks,
 
@@ -48,13 +57,9 @@ def mean_track_error(gt, tracks, metric="L1", av_channels=True):
         axis = 0
 
     if metric == "L1":
-        error = [
-            np.mean(np.abs(gt[i] - track), axis=axis) for i, track in enumerate(tracks)
-        ]
+        error = [np.mean(np.abs(gt[i] - tracks[i]), axis=axis) for i in range(len(gt))]
     elif metric == "L2":
-        error = [
-            np.mean((gt[i] - track) ** 2, axis=axis) for i, track in enumerate(tracks)
-        ]
+        error = [np.mean((gt[i] - tracks[i]) ** 2, axis=axis) for i in range(len(gt))]
 
     return np.array(error)
 
@@ -70,13 +75,13 @@ def inverse_log_min_max(y, eps=0.01, log_base=np.e):
     return x
 
 
-def find_crossing_green(x, y, th=0.03, return_idx=False):
+def find_crossing_green(x, y, th=0.03, th_phase=0.15, return_idx=False):
     """
     Return the x-coordinate of the 'meaningful' threshold crossing.
     This is used to find the G1/S transitions.
 
     Logic:
-    1. If y is above threshold for all x in [0, 0.15],
+    1. If y is above threshold for all x in [0, th_phase],
        return 0. (We say the crossing happened at 0.)
     2. Otherwise, find the first time y >= th for x > 0.15.
        If none found, return None.
@@ -85,7 +90,7 @@ def find_crossing_green(x, y, th=0.03, return_idx=False):
     # 1) Check if y is >= th *throughout* 0 <= x <= 0.15
     #    That means for all indices where x <= 0.15, y >= th.
     #    We find the indices up to 0.15, and see if y is always above threshold.
-    in_early_region = np.where(x <= 0.15)[0]
+    in_early_region = np.where(x <= th_phase)[0]
     if len(in_early_region) > 0:
         # All y values in [0, 0.15] region
         y_early = y[in_early_region]
@@ -95,6 +100,23 @@ def find_crossing_green(x, y, th=0.03, return_idx=False):
 
     # 2) Otherwise, we look for the first index i where x[i] > 0.15 and y[i] >= th
     crossing_indices = np.where((x > 0.15) & (y >= th))[0]
+    if len(crossing_indices) == 0:
+        return None, None if return_idx else None
+
+    # Return the x-coordinate of the first crossing
+    if return_idx:
+        return x[crossing_indices[0]], crossing_indices[0]
+    else:
+        return x[crossing_indices[0]]
+
+
+def find_crossing_green2(x, y, th=0.1, th_phase=0.4, return_idx=False):
+    """
+    Return the x-coordinate of the 'meaningful' threshold crossing.
+    FOR DRUGGED CELLS
+    """
+
+    crossing_indices = np.where((x > th_phase) & (y >= th))[0]
     if len(crossing_indices) == 0:
         return None, None if return_idx else None
 
@@ -126,7 +148,10 @@ def find_crossing_points(
     taus: list,
     tracks: list,
     tr_green: float = 0.03,
+    tr_phase_green: float = 0.15,
     tr_red: float = 0.02,
+    drug: bool = False,
+    smooth_window: int = None,
 ):
     """
     Find the crossing points for the green and red signals.
@@ -137,12 +162,30 @@ def find_crossing_points(
     return_idx = True
 
     for i in range(n_tracks):
-        fucci_green = inverse_log_min_max(tracks[i][:, 0])
-        fucci_red = inverse_log_min_max(tracks[i][:, 1])
+        track = tracks[i]
+        if smooth_window is not None:
+            track[:, 0] = np.convolve(
+                track[:, 0], np.ones(smooth_window) / smooth_window, mode="same"
+            )
+            track[:, 1] = np.convolve(
+                track[:, 1], np.ones(smooth_window) / smooth_window, mode="same"
+            )
 
-        crossing_green, idx_green = find_crossing_green(
-            taus[i], fucci_green, tr_green, return_idx=return_idx
-        )
+        fucci_green = inverse_log_min_max(track[:, 0])
+        fucci_red = inverse_log_min_max(track[:, 1])
+
+        if drug:
+            crossing_green, idx_green = find_crossing_green2(
+                taus[i],
+                fucci_green,
+                tr_green,
+                return_idx=return_idx,
+                th_phase=tr_phase_green,
+            )
+        else:
+            crossing_green, idx_green = find_crossing_green(
+                taus[i], fucci_green, tr_green, return_idx=return_idx
+            )
         crossing_red, idx_red = find_crossing_red(
             taus[i], fucci_red, tr_red, return_idx=return_idx
         )
@@ -150,6 +193,65 @@ def find_crossing_points(
         idx_crossings[i] = idx_green, idx_red
 
     return crossings, idx_crossings
+
+
+def r2_track(gt, tracks):
+    """
+    Returns the R2 score between the ground truth for all tracks and the predicted tracks
+    """
+    n_tracks = len(tracks)
+    r2 = np.zeros((n_tracks, 2))
+
+    for i in range(len(gt)):
+        r2_green = r2_score(gt[i][:, 0], tracks[i][:, 0])
+        r2_red = r2_score(gt[i][:, 1], tracks[i][:, 1])
+
+        r2[i] = r2_green, r2_red
+
+    return r2
+
+
+def track_errors_flattened(gt_tracks, tracks):
+    """
+    This returns all erros in a flattened form
+    without averaging over the tracks
+    """
+
+    n_tracks = len(tracks)
+    errors_g = []
+    errors_r = []
+    taus = []
+    for i in range(n_tracks):
+        error = np.abs(tracks[i] - gt_tracks[i])
+        errors_g.append(error[:, 0])
+        errors_r.append(error[:, 1])
+        taus.append(np.linspace(0, 1, error.shape[0]))
+    errors_g_unrolled = np.concatenate(errors_g)
+    errors_r_unrolled = np.concatenate(errors_r)
+    taus_unrolled = np.concatenate(taus)
+
+    return errors_g_unrolled, errors_r_unrolled, taus_unrolled
+
+
+def bin_avarage_errors(errors, taus, n_bins=30):
+    """
+    Take a list of errors and taus, and bin them according to the taus.
+    It takes the output of track_errors_flattened as input
+    """
+    bins = np.linspace(0, 1, n_bins + 1)
+    bin_indices = np.digitize(taus, bins) - 1  # Bin indices (0-indexed)
+
+    # Compute bin averages
+    averaged_profile = np.array(
+        [
+            errors[bin_indices == i].mean() if np.any(bin_indices == i) else 0
+            for i in range(n_bins)
+        ]
+    )
+    return averaged_profile, bins
+
+
+###############################################
 
 
 def vanilla_fn(
@@ -190,3 +292,30 @@ def plot_fucci(track, time="standard", delta_t=5, label=None):
     plt.plot(t, track[:, 0], label=label, c="g")
     plt.plot(t, track[:, 1], label=label, c="r")
     plt.legend()
+
+
+#############################
+
+
+# Function to process the DataFrame and generate LaTeX output with 3 decimal places
+def generate_latex_with_bolding(df, drug):
+    latex_df = df.copy()
+
+    if drug:
+        min_columns = ["L^1_{green}", "L^1_{red}"]
+    else:
+        min_columns = ["L^1_{green}", "L^1_{red}", "\Delta t_g", "\Delta t_r"]
+
+    for col in min_columns:
+        min_value = df[col].min()
+        latex_df[col] = df[col].apply(
+            lambda x: f"\\textbf{{{x:.3f}}}" if x == min_value else f"{x:.3f}"
+        )
+
+    for col in ["R^2_{green}", "R^2_{red}"]:
+        max_value = df[col].max()
+        latex_df[col] = df[col].apply(
+            lambda x: f"\\textbf{{{x:.3f}}}" if x == max_value else f"{x:.3f}"
+        )
+
+    return latex_df.to_latex(index=True, escape=False)
