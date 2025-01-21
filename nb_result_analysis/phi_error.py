@@ -45,7 +45,6 @@ track_lengths = [track.shape[0] for track in gt_tracks]
 
 modality = "bf"
 
-head = "xtransformer"
 
 errors_g = {}
 errors_r = {}
