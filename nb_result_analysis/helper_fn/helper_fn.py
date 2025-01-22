@@ -2,7 +2,7 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
-from find_checkpoints import *
+from .find_checkpoints import *
 
 # name of all heads
 heads = ["mlp", "cnn", "lstm", "xtransformer-causal", "mamba", "xtransformer"]
@@ -193,9 +193,16 @@ def generate_latex_with_bolding(df, drug):
     latex_df = df.copy()
 
     if drug:
-        min_columns = ["L^1_{green}", "L^1_{red}"]
+        min_columns = ["L^1_{green}", "L^1_{red}", "DTW_{green}", "DTW_{red}"]
     else:
-        min_columns = ["L^1_{green}", "L^1_{red}", "\Delta t_g", "\Delta t_r"]
+        min_columns = [
+            "L^1_{green}",
+            "L^1_{red}",
+            "\Delta t_{green}",
+            "\Delta t_{red}",
+            "DTW_{green}",
+            "DTW_{red}",
+        ]
 
     for col in min_columns:
         min_value = df[col].min()
