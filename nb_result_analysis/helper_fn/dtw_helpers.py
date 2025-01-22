@@ -187,7 +187,7 @@ def vanilla_fn(
 #     return dist_g, dist_r
 
 
-def dtw_dist_gr(gt_track, track, len_normalize=False, penalty=None):
+def dtw_dist_gr(gt_track, track, len_normalize=True, penalty=None):
     """
     Outputs the DTW amount between the the track and the ground truth track
     for both channels separately
