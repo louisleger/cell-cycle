@@ -100,7 +100,8 @@ def find_crossing_points(
     return_idx = True
 
     for i in range(n_tracks):
-        track = tracks[i]
+        track = tracks[i].copy()
+
         if smooth_window is not None:
             track[:, 0] = np.convolve(
                 track[:, 0], np.ones(smooth_window) / smooth_window, mode="same"
