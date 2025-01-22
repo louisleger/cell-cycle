@@ -189,19 +189,19 @@ def plot_fucci(track, time="standard", delta_t=5, label=None):
 
 
 # Function to process the DataFrame and generate LaTeX output with 3 decimal places
-def generate_latex_with_bolding(df, drug):
+def generate_latex_with_bolding(df, drug, return_df=False):
     latex_df = df.copy()
 
     if drug:
-        min_columns = ["L^1_{green}", "L^1_{red}", "DTW_{green}", "DTW_{red}"]
+        min_columns = ["L^1_{1}", "L^1_{2}", "DTW_{1}", "DTW_{2}"]
     else:
         min_columns = [
-            "L^1_{green}",
-            "L^1_{red}",
-            "\Delta t_{green}",
-            "\Delta t_{red}",
-            "DTW_{green}",
-            "DTW_{red}",
+            "L^1_{1}",
+            "L^1_{2}",
+            "\Delta t_{1}",
+            "\Delta t_{2}",
+            "DTW_{1}",
+            "DTW_{2}",
         ]
 
     for col in min_columns:
@@ -210,10 +210,13 @@ def generate_latex_with_bolding(df, drug):
             lambda x: f"\\textbf{{{x:.3f}}}" if x == min_value else f"{x:.3f}"
         )
 
-    for col in ["R^2_{green}", "R^2_{red}"]:
+    for col in ["R^2_{1}", "R^2_{2}"]:
         max_value = df[col].max()
         latex_df[col] = df[col].apply(
             lambda x: f"\\textbf{{{x:.3f}}}" if x == max_value else f"{x:.3f}"
         )
 
-    return latex_df.to_latex(index=True, escape=False)
+    if return_df:
+        return latex_df
+    else:
+        return latex_df.to_latex(index=True, escape=False)

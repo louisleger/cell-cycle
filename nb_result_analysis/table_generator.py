@@ -27,7 +27,7 @@ gt_drug_path = os.path.join(path, "GT_drug/labels/")
 
 
 drug = True
-remove_mod_col = True
+remove_mod_col = False
 
 if drug:
     data_path_ = data_drug_path
@@ -82,7 +82,7 @@ for mod in modalities:
         r2 = r2_track(gt_tracks, tracks).mean(axis=0)
 
         # dtw distance
-        dtw_dist = dtw_dist_loop(gt_tracks, tracks).mean(axis=0)
+        dtw_dist = dtw_dist_loop(gt_tracks, tracks, len_normalize=True).mean(axis=0)
 
         if not drug:
             new_row = pd.DataFrame(
@@ -90,14 +90,14 @@ for mod in modalities:
                     {
                         "head": head,
                         "modality": mod,
-                        "L^1_{green}": l1_mean_error[0],
-                        "L^1_{red}": l1_mean_error[1],
-                        "\Delta t_{green}": t_g,
-                        "\Delta t_{red}": t_r,
-                        "R^2_{green}": r2[0],
-                        "R^2_{red}": r2[1],
-                        "DTW_{green}": dtw_dist[0],
-                        "DTW_{red}": dtw_dist[1],
+                        "L^1_{1}": l1_mean_error[0],
+                        "L^1_{2}": l1_mean_error[1],
+                        "\Delta t_{1}": t_g,
+                        "\Delta t_{2}": t_r,
+                        "R^2_{1}": r2[0],
+                        "R^2_{2}": r2[1],
+                        "DTW_{1}": dtw_dist[0],
+                        "DTW_{2}": dtw_dist[1],
                     }
                 ]
             )
@@ -108,12 +108,12 @@ for mod in modalities:
                     {
                         "head": head,
                         "modality": mod,
-                        "L^1_{green}": l1_mean_error[0],
-                        "L^1_{red}": l1_mean_error[1],
-                        "R^2_{green}": r2[0],
-                        "R^2_{red}": r2[1],
-                        "DTW_{green}": dtw_dist[0],
-                        "DTW_{red}": dtw_dist[1],
+                        "L^1_{1}": l1_mean_error[0],
+                        "L^1_{2}": l1_mean_error[1],
+                        "R^2_{1}": r2[0],
+                        "R^2_{2}": r2[1],
+                        "DTW_{1}": dtw_dist[0],
+                        "DTW_{2}": dtw_dist[1],
                     }
                 ]
             )
@@ -140,8 +140,20 @@ if drug:
 else:
     drug_str = ""
 
-print(f"bf{drug_str} \n")
-print(generate_latex_with_bolding(df_bf, drug=drug))
-print("\n")
-print(f"h2b{drug_str} \n")
-print(generate_latex_with_bolding(df_h2b, drug=drug))
+
+dfl_bf = generate_latex_with_bolding(df_bf, drug=drug, return_df=True)
+dfl_h2b = generate_latex_with_bolding(df_h2b, drug=drug, return_df=True)
+
+# erge the 2 df
+dfl = pd.concat([dfl_bf, dfl_h2b], axis=0)
+
+if not drug:
+    print(f"bio table{drug_str} \n")
+    bio_df = dfl[["modality", "\Delta t_{1}", "\Delta t_{2}"]]
+    print(bio_df.to_latex(index=False, escape=False))
+
+print(f"non bio table{drug_str} \n")
+non_bio_df = dfl[
+    ["modality", "L^1_{1}", "L^1_{2}", "R^2_{1}", "R^2_{2}", "DTW_{1}", "DTW_{2}"]
+]
+print(non_bio_df.to_latex(index=False, escape=False))
