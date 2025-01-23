@@ -6,6 +6,14 @@ from .find_checkpoints import *
 
 # name of all heads
 heads = ["mlp", "cnn", "lstm", "xtransformer-causal", "mamba", "xtransformer"]
+head_names = [
+    "Single Frame",
+    "Causal CNN",
+    "LSTM",
+    "Causal Transformer",
+    "Mamba",
+    "Transformer",
+]
 
 # colors assigned to each head, can be improved
 available_colors = ["#1f77b4", "brown", "purple", "#8c564b", "#9467bd", "orange"]
@@ -183,40 +191,3 @@ def plot_fucci(track, time="standard", delta_t=5, label=None):
     plt.plot(t, track[:, 0], label=label, c="g")
     plt.plot(t, track[:, 1], label=label, c="r")
     plt.legend()
-
-
-#############################
-
-
-# Function to process the DataFrame and generate LaTeX output with 3 decimal places
-def generate_latex_with_bolding(df, drug, return_df=False):
-    latex_df = df.copy()
-
-    if drug:
-        min_columns = ["L^1_{1}", "L^1_{2}", "DTW_{1}", "DTW_{2}"]
-    else:
-        min_columns = [
-            "L^1_{1}",
-            "L^1_{2}",
-            "\Delta t_{1}",
-            "\Delta t_{2}",
-            "DTW_{1}",
-            "DTW_{2}",
-        ]
-
-    for col in min_columns:
-        min_value = df[col].min()
-        latex_df[col] = df[col].apply(
-            lambda x: f"\\textbf{{{x:.3f}}}" if x == min_value else f"{x:.3f}"
-        )
-
-    for col in ["R^2_{1}", "R^2_{2}"]:
-        max_value = df[col].max()
-        latex_df[col] = df[col].apply(
-            lambda x: f"\\textbf{{{x:.3f}}}" if x == max_value else f"{x:.3f}"
-        )
-
-    if return_df:
-        return latex_df
-    else:
-        return latex_df.to_latex(index=True, escape=False)
