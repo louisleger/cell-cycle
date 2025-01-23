@@ -58,8 +58,9 @@ crossing_points_gt, idx_gt = find_crossing_points(
 track_lengths = [track.shape[0] for track in gt_tracks]
 
 modalities = ["bf", "h2b"]
+df_metrics = pd.DataFrame()  # For all metrics except "\Delta t_{}"
+df_delta_t = pd.DataFrame()  # For "\Delta t_{}" (only when drug=False)
 
-df = pd.DataFrame()
 for mod in modalities:
     for i, head in enumerate(heads):
         tracks = get_data(data_path_, mod, head)
@@ -86,75 +87,61 @@ for mod in modalities:
         # dtw distance
         dtw_dist = dtw_dist_loop(gt_tracks, tracks, len_normalize=False, penalty=0.1)
         dtw_dist_mean = dtw_dist.mean(axis=0)
-        dte_dist_std = dtw_dist.std(axis=0)
+        dtw_dist_std = dtw_dist.std(axis=0)
 
+        # Common metrics DataFrame
+        new_metrics_row = pd.DataFrame(
+            [
+                {
+                    "head": head_names[i],
+                    "modality": mod,
+                    "L^1_{1}": l1_mean_error[1],
+                    "L^1_{2}": l1_mean_error[0],
+                    "R^2_{1}": r2_mean[1],
+                    "R^2_{2}": r2_mean[0],
+                    "DTW": dtw_dist_mean,
+                }
+            ]
+        )
+        df_metrics = pd.concat([df_metrics, new_metrics_row])
+
+        # WT-specific metrics (only when drug=False)
         if not drug:
-            new_row = pd.DataFrame(
+            new_delta_t_row = pd.DataFrame(
                 [
                     {
                         "head": head_names[i],
                         "modality": mod,
-                        "L^1_{1}": l1_mean_error[1],
-                        "L^1_{2}": l1_mean_error[0],
-                        "\Delta t_{1}": t_r,
-                        "\Delta t_{2}": t_g,
-                        "R^2_{1}": r2_mean[1],
-                        "R^2_{2}": r2_mean[0],
-                        "DTW": dtw_dist_mean,
+                        "\Delta t_{1}": t_g,
+                        "\Delta t_{2}": t_r,
                     }
                 ]
             )
+            df_delta_t = pd.concat([df_delta_t, new_delta_t_row])
 
-        else:
-            new_row = pd.DataFrame(
-                [
-                    {
-                        "head": head,
-                        "modality": mod,
-                        "L^1_{1}": l1_mean_error[1],
-                        "L^1_{2}": l1_mean_error[0],
-                        "R^2_{1}": r2[1],
-                        "R^2_{2}": r2[0],
-                        "DTW": dtw_dist_mean,
-                    }
-                ]
-            )
-
-        df = pd.concat([df, new_row])
-
-
-df_bf = df[df["modality"] == "bf"]
-df_h2b = df[df["modality"] == "h2b"]
-
-df_bf.index = df_bf["head"]
-df_h2b.index = df_h2b["head"]
-
-df_bf = df_bf.drop(columns=["head"])
-df_h2b = df_h2b.drop(columns=["head"])
-
-if remove_mod_col:
-    df_bf = df_bf.drop(columns=["modality"])
-    df_h2b = df_h2b.drop(columns=["modality"])
-
-
-if drug:
-    drug_str = " drug"
-else:
-    drug_str = ""
-
-
-dfl_bf = generate_latex_with_bolding(df_bf, drug=drug, return_df=True)
-dfl_h2b = generate_latex_with_bolding(df_h2b, drug=drug, return_df=True)
-
-# erge the 2 df
-dfl = pd.concat([dfl_bf, dfl_h2b], axis=0)
+# Set index and drop columns as needed
+df_metrics.index = df_metrics["head"]
+df_metrics = df_metrics.drop(columns=["head"])
 
 if not drug:
-    print(f"bio table{drug_str} \n")
-    bio_df = dfl[["modality", "\Delta t_{1}", "\Delta t_{2}"]]
-    bio_df.columns = ["modality", "\Delta t_{1} [min]", "\Delta t_{2} [min]"]
-    print(bio_df.to_latex(index=True, escape=False))
+    df_delta_t.index = df_delta_t["head"]
+    df_delta_t = df_delta_t.drop(columns=["head"])
+    df_delta_t.columns = ["modality", "\Delta t_{G1/S} [min]", "\Delta t_{S/G2} [min]"]
 
-print(f"non bio table{drug_str} \n")
-non_bio_df = dfl[["modality", "L^1_{1}", "L^1_{2}", "R^2_{1}", "R^2_{2}", "DTW"]]
-print(non_bio_df.to_latex(index=True, escape=False))
+# # Remove modality column if specified
+# if remove_mod_col:
+#     df_metrics = df_metrics.drop(columns=["modality"])
+#     if not drug:
+#         df_delta_t = df_delta_t.drop(columns=["modality"])
+
+df_metrics = df_metrics.round(3)
+if not drug:
+    df_delta_t = df_delta_t.round(1)
+df_metrics
+
+# print(df_metrics.to_string())
+
+
+print(generate_latex_with_bolding_3f(df_metrics, return_df=False))
+if not drug:
+    print(generate_latex_with_bolding_1f(df_delta_t, return_df=False))
