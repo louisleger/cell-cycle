@@ -2,7 +2,6 @@ from modules.learning.time_encoders.mamba import *
 import torch.nn as nn
 
 
-
 """"
 
 Model architecture script. Contains pytorch nn architectures for a custom CNN, EfficientNet wrapper and the DYCE model (CNN-Mamba)
@@ -13,7 +12,6 @@ Model architecture script. Contains pytorch nn architectures for a custom CNN, E
 # Vanilla Model wrapped in a PyTorch NN Module so it can benchmark predictions later
 import torch
 import numpy as np
-
 
 
 class Vanilla_Model(nn.Module):
